@@ -16,6 +16,7 @@ Related work in Python includes
 - [Flufl i18n substitutions](https://flufli18n.readthedocs.io/en/stable/using.html#substitutions-and-placeholders)
 - [Tagged library](https://github.com/jviide/tagged)
 - [PEP 501: Interpolation templates](https://peps.python.org/pep-0501/)
+- [Earlier work by the same authors](https://github.com/jimbaker/fl-string-pep)
 
 
 # Implementation
