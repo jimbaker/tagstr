@@ -1,17 +1,13 @@
 import pprint
 import re
 import textwrap
-from dataclasses import dataclass
 
 from taglib import Thunk, decode_raw
 
 
-@dataclass
-class PythonCode:
-    code: list[str]
-
-    def __str__(self):
-        return textwrap.dedent(''.join(self.code))
+class PythonCode(str):
+    def __new__(cls, code: list[str]):
+        return super().__new__(cls, textwrap.dedent(''.join(code)))
 
 
 def param_list(names):
@@ -61,7 +57,7 @@ def code(*args: str | Thunk) -> PythonCode:
     return PythonCode(text)
 
 
-def main():
+def useit():
     args = ['x', 'y', 'z']
     results = {'a': 2, 'b': 3, 'c': 5, 'd': 7, 'e': 11}
     print(code"""
@@ -72,4 +68,4 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    useit()
