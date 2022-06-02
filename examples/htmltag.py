@@ -13,21 +13,7 @@ from html.parser import HTMLParser
 from types import CodeType
 from typing import *
 
-
-# getvalue, raw, conv, formatspec
-Thunk = tuple[
-    Callable[[], Any],
-    str,
-    str | None,
-    str | None,
-]
-
-
-def decode_raw(s: str) -> str:
-    # To bytes, then decoded back as a string, applying amy escapes. There may
-    # be a better way, but this conversion uses the same internal code path as
-    # Python's parser.
-    return s.encode('utf-8').decode('unicode-escape')
+from taglib import decode_raw, Thunk
 
 
 ENDS_WITH_WHITESPACE_RE = re.compile(r'\s+$')
@@ -133,12 +119,13 @@ class DomCodeGenerator(HTMLParser):
 def make_compiled_template(*args: str | CodeType) -> Callable:
     print(f'Making compiled template {hash(args)}...')
     builder = DomCodeGenerator()
-    for i, arg in enumerate(args):
-        if isinstance(arg, str):
-            builder.feed(decode_raw(arg))
-        else:
-            builder.add_interpolation(i)
-    print(builder.code)
+    for i, arg in enumerate(decode_raw(*args)):
+        match arg:
+            case str():
+                builder.feed(arg)
+            case _:
+                builder.add_interpolation(i)
+    print("Code:\n", builder.code)
     code_obj = compile(builder.code, '<string>', 'exec')
     captured = {}
     exec(code_obj, captured)
