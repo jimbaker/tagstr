@@ -82,7 +82,7 @@ class Qmarkify:
                         # any placeholders used.
                         statement.append(self._quote_identifier(value))
                     else:
-                        raise ValueError(f'Cannot interpolate {raw} in safe mode')
+                        raise ValueError(f'Cannot interpolate {raw!r} in safe mode')
 
         stmt = ''.join(statement)
         print(f'{stmt=}, {use_executemany=}, {values=}')
@@ -124,7 +124,7 @@ def demo():
             assert 'Did not raise error'
         except ValueError:
             pass
-
+        cur.execute(*sql'drop table {table_name}')
 
 if __name__ == '__main__':
     demo()
