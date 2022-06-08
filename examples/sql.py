@@ -124,7 +124,7 @@ def demo():
             assert 'Did not raise error'
         except ValueError:
             pass
-        cur.execute(*sql'drop table {table_name}')
+
 
 if __name__ == '__main__':
     demo()
