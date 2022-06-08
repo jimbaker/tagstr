@@ -1,6 +1,8 @@
 import re
 import sqlite3
+from collections import namedtuple
 from collections.abc import Iterable
+
 
 from taglib import Thunk, decode_raw
 
@@ -15,11 +17,11 @@ def combine(cols: Iterable) -> Iterable[tuple]:
             break
 
 
+Qmarked = namedtuple('Qmarked', ['statements', 'values'])
 VALUES_RE = re.compile(r'\s+values\s+\($', re.IGNORECASE)
 
-
 class Qmarkify:
-    """Logic to support a `sql` tag string implementation, safe or unsafe"""
+    """Implements `sql` tag string for SQLite, safe or unsafe"""
     # TODO consider changing to named placeholders instead of qmarks, especially
     # given that we have the raw expression (taking into account that the raw
     # expression might be an arbitrary expression, so need to mangle
@@ -28,7 +30,7 @@ class Qmarkify:
         self.unsafe = unsafe
 
     @staticmethod
-    def _quote_identifier(name):
+    def _quote_identifier(name: str) -> str:
         # NOTE: This quoting rule is used by the PostgreSQL and SQLite dialects,
         # and possibly others. For SQLite at least, it is also guaranteed that
         # any quoting does not change case insensitivity. This means such
@@ -36,10 +38,9 @@ class Qmarkify:
         s = name.replace('"', '""')  # double any quoting to escape it
         return f'"{s}"'
 
-    def __call__(self, *args: str | Thunk, unsafe=False):
+    def __call__(self, *args: str | Thunk, unsafe=False) -> Qmarked[str, tuple]:
         # NOTE this is a very limited parser. But SQL! It just might be
         # sufficient for the limited aspect we are supporting.
-        #
 
         statement = []
         values = []
@@ -59,7 +60,12 @@ class Qmarkify:
                         in_values = True
                 case getvalue, raw, _, _:
                     value = getvalue()
-                    if in_values:
+                    if isinstance(value, Qmarked):
+                        sub_statement, sub_values = value
+                        if sub_values:
+                            raise ValueError(f'Cannot substitute with placeholders {raw!r}: {sub_statement}')
+                        statement.append(sub_statement)
+                    elif in_values:
                         statement.append('?')
                         # This executemany selection logic seems brittle and is
                         # potentially flawed.
@@ -76,10 +82,6 @@ class Qmarkify:
                     elif self.unsafe:
                         # This is in not a placeholder position, but we allow
                         # for it to be inserted here.
-                        #
-                        # FIXME add support for recursive building by *not*
-                        # quoting as an identifier but this also needs tracking
-                        # any placeholders used.
                         statement.append(self._quote_identifier(value))
                     else:
                         raise ValueError(f'Cannot interpolate {raw!r} in safe mode')
@@ -92,7 +94,7 @@ class Qmarkify:
         elif any(use_executemany.values()):
             raise ValueError('Columns must all either be a collection of values or a single value')
         else:
-            return stmt, values
+            return Qmarked(stmt, values)
 
 
 sql = Qmarkify()
@@ -100,6 +102,9 @@ sql_unsafe = Qmarkify(unsafe=True)
 
 
 # Compare against the example in https://docs.python.org/3/library/sqlite3.html
+# 
+# FIXME need to add more demo SQL here, with respect to nested subqueries, etc
+# presumably in the SQLite docs.
 def demo():
     table_name = 'lang'
     name = 'C'
@@ -115,9 +120,8 @@ def demo():
         cur.executemany(*sql'insert into lang values ({names}, {dates})')
 
         # FIXME time to write proper unit tests!
-        # NOTE assumes that SQLite maintains insertion order (as it apparently does)
-        assert list(cur.execute('select * from lang')) == \
-            [('C', 1972),  ('Fortran', 1957), ('Python', 1991), ('Go', 2009)]
+        assert set(cur.execute('select * from lang')) == \
+            {('C', 1972),  ('Fortran', 1957), ('Python', 1991), ('Go', 2009)}
 
         try:
             cur.execute(*sql'drop table {table_name}')
