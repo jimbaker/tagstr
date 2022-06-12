@@ -1,5 +1,7 @@
 PEP: 999
 Title: Tag Strings: Tutorial
+Content-Type: text/x-rst
+
 
 Abstract
 ========
@@ -18,15 +20,13 @@ Tutorial
 ========
 
 Tag strings start with the functionality in f-strings, as described in PEP 498.
-Let's take a look first at a simple example with f-strings:
+Let's take a look first at a simple example with f-strings::
 
-.. code-block::
     name = 'Jim'
     s = f"Hello, {name}, it's great to meet you!"
 
-This is the equivalent of writing
+The above code is the equivalent of writing this code::
 
-.. code-block::
     name = 'Jim'
     s = 'Hello, ' + format(name, '') + ", it's great to meet you!"
     
@@ -42,27 +42,24 @@ Often this overall string construction is exactly what you want.
 
 But consider this shell example. You want to use ``subprocess.run``, but for
 your scenario you would like to use the full power of the shell (so you need to
-have the keyword arg ``use_shell=True``):
+have the keyword arg ``use_shell=True``)::
 
-.. code-block::
     import subprocess
 
     path = 'some/path/to/data'
     print(subprocess.run('ls -ls {path} | (echo "First 5 results from ls:"; head -5)', use_shell=True))
 
 This code is broken on any untrusted input. In other words, we have a shell
-injection attack, or from XKCD, a Bobby Tables problem:
+injection attack, or from XKCD, a Bobby Tables problem::
 
-.. code-block::
     import subprocess
 
     path = 'foo; cat /etc/passwd'
     print(subprocess.run('ls -ls {path} | (echo "First 5 results from ls:"; head -5)', use_shell=True))
 
 There's a straightforward fix. You just need to quote the interpolation of
-``path`` with ``shlex.quote``:
+``path`` with ``shlex.quote``::
 
-.. code-block::
     import shlex
     import subprocess
 
@@ -70,24 +67,22 @@ There's a straightforward fix. You just need to quote the interpolation of
     print(subprocess.run('ls -ls {shlex.quote(path)} | (echo "First 5 results from ls:"; head -5)', use_shell=True))
 
 For the first example, you can write a ``sh`` tag that automatically does this
-interpolation for the user.
+interpolation for the user::
 
-.. code-block::
     path = 'foo; cat /etc/passwd'
     print(subprocess.run(sh'ls -ls {path}', use_shell=True))
 
 Fundamentally tag strings are a straightforward generalization of f-strings:
 
-- f-strings are a sequence of strings (possibly raw, with ``fr``) and
+* f-strings are a sequence of strings (possibly raw, with ``fr``) and
   interpolations (including format specification and conversions, such as ``!r``
   for ``repr``); when evaluated, they result in a string
-- tag strings are a sequence of **raw** strings and **thunks**, which generalize
+* tag strings are a sequence of **raw** strings and **thunks**, which generalize
   such interpolations; and result in **any value**
 
 This then gives us the following generic signature for a **tag function**,
-``some_tag``:
+``some_tag``::
 
-.. code-block::
     Thunk = tuple[
         Callable[[], Any],  # getvalue
         str,  # raw
@@ -97,9 +92,8 @@ This then gives us the following generic signature for a **tag function**,
 
     def some_tag(*args: str | Thunk) -> Any
 
-Let's now write a first pass of this tag function, ``sh``:
+Let's now write a first pass of this tag function, ``sh``::
 
-.. code-block::
     def sh(*args: str | Thunk) -> str:
         command = []
         for arg in args:
