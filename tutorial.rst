@@ -36,7 +36,6 @@ The above code is the equivalent of writing this code::
 
 Here we see that the f-string syntax has a compact syntax for combining into one
 string a sequence of strings -- ``'Hello, '`` and ``", it's great to meet
-
 you!"`` -- with interpolations of values, which are formatted into strings.
 Often this overall string construction is exactly what you want.
 
