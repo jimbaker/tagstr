@@ -91,7 +91,7 @@ So in the example above::
 
     sh'ls -ls {path}'
 
-``sh`` is the tag, and it is a function with this signature:
+``sh`` is the tag, and it is a function with this signature::
 
     def sh(*args: str | Thunk) -> str:
         ...
