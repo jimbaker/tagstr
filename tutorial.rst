@@ -40,47 +40,60 @@ you!"`` -- with interpolations of values, which are formatted into strings.
 Often this overall string construction is exactly what you want.
 
 But consider this shell example. You want to use ``subprocess.run``, but for
-your scenario you would like to use the full power of the shell (so you need to
-have the keyword arg ``use_shell=True``)::
+your scenario you would like to use the full power of the shell, including pipes
+and subprocesses. This means you have to use ``use_shell=True``::
 
-    import subprocess
+    from subprocess import run
 
     path = 'some/path/to/data'
-    print(subprocess.run('ls -ls {path} | (echo "First 5 results from ls:"; head -5)', use_shell=True))
+    print(run(f'ls -ls {path} | (echo "First 5 results from ls:"; head -5)', use_shell=True))
 
-This code is broken on any untrusted input. In other words, we have a shell
-injection attack, or from XKCD, a Bobby Tables problem::
-
-    import subprocess
+However, this code as written is broken on any untrusted input. In other words,
+we have a shell injection attack, or from XKCD, a Bobby Tables problem::
 
     path = 'foo; cat /etc/passwd'
-    print(subprocess.run('ls -ls {path} | (echo "First 5 results from ls:"; head -5)', use_shell=True))
+    print(run(f'ls -ls {path} | (echo "First 5 results from ls:"; head -5)', use_shell=True))
 
-There's a straightforward fix. You just need to quote the interpolation of
-``path`` with ``shlex.quote``::
+There's a straightforward fix, of course. Quote the interpolation of ``path``
+with ``shlex.quote``::
 
     import shlex
-    import subprocess
 
     path = 'foo; cat /etc/passwd'
-    print(subprocess.run('ls -ls {shlex.quote(path)} | (echo "First 5 results from ls:"; head -5)', use_shell=True))
+    print(run(f'ls -ls {shlex.quote(path)} | (echo "First 5 results from ls:"; head -5)', use_shell=True))
 
-For the first example, you can write a ``sh`` tag that automatically does this
+However, this means that wherever you use such interpolations within a f-string,
+you need to ensure that the interpolation is properly quoted. This can be easy
+to forget. Let's fix this potential oversight by using tag string support.
+
+Writing a ``sh`` tag
+--------------------
+
+For the first example, we want to write a ``sh`` tag that automatically does this
 interpolation for the user::
 
     path = 'foo; cat /etc/passwd'
-    print(subprocess.run(sh'ls -ls {path}', use_shell=True))
+    print(run(sh'ls -ls {path}', use_shell=True))
 
 Fundamentally tag strings are a straightforward generalization of f-strings:
 
-* f-strings are a sequence of strings (possibly raw, with ``fr``) and
+* a f-string is a sequence of strings (possibly raw, with ``fr``) and
   interpolations (including format specification and conversions, such as ``!r``
-  for ``repr``); when evaluated, they result in a string
-* tag strings are a sequence of **raw** strings and **thunks**, which generalize
-  such interpolations; and result in **any value**
+  for ``repr``). This sequence is implicitly evaluated by concatenating.
 
-This then gives us the following generic signature for a **tag function**,
-``some_tag``::
+* a tag strings is a sequence of **raw** strings and **thunks**, which
+  generalize such interpolations. This sequence is implicitly evaluated by calling a
+  **tag function**, which can return **any value**.
+
+So in the example above::
+
+    sh'ls -ls {path}'
+
+``sh`` is the tag, and it is a function with this signature:
+
+    def some_tag(*args: str | Thunk) -> str
+
+So what is a thunk? It has the following type::
 
     Thunk = tuple[
         Callable[[], Any],  # getvalue
@@ -89,16 +102,29 @@ This then gives us the following generic signature for a **tag function**,
         str | None,  # formatspec
     ]
 
+* ``getvalue`` is the lambda-wrapped expression of the interpolation. For
+  ``sh'ls -ls {path}``, ``getvalue`` is ``lambda: path``.
+* ``raw`` is the expression text of the interpolation. In this example, it's ``path``.
+* ``conv`` is the optional conversion used, one of `r`, `s`, and `a`,
+  corresponding to repr, str, and ascii conversions.
+* ``formatspec`` is the optional formatspec.
+
+This then gives us the following generic signature for a **tag function**,
+``some_tag``::
+
     def some_tag(*args: str | Thunk) -> Any
 
-Let's now write a first pass of this tag function, ``sh``::
+Let's now write a first pass of ``sh``::
 
     def sh(*args: str | Thunk) -> str:
         command = []
         for arg in args:
             match arg:
+                # handle each static part of the tag string
                 case str():
                     command.append(arg)
+                # handle each dynamic part of the tag string by interpolating it,
+                # including the necessary shell quoting
                 case getvalue, _, _, _:
                     command.append(shlex.quote(str(getvalue()))
         return ''.join(command)
@@ -106,21 +132,59 @@ Let's now write a first pass of this tag function, ``sh``::
 Let's go through this code: for each arg, either it's a string (the static
 part), or an interpolation (the dynamic part).
 
-If it's the static part, it's code the tag user wrote to work with the shell.
-That shell code can be considered to be safe (not necessarily correct!). Note
-that for tag strings, this will always be a raw string. This is convenient for
-working with the shell - we might want to use regexes in ``grep`` or similar
-tools like the Silver Surfer (``ag``).
+If it's the **static** part, it's shell code the developer using the ``sh`` tag
+wrote to work with the shell. So this cannot be user input -- it's part of the
+Python code, and it is therefore can be safely used without further quoting. (Of
+course the code could have a bug, just like any other line of code in this
+program.) Note that for tag strings, this will always be a raw string. This is
+convenient for working with the shell - we might want to use regexes in ``grep``
+or similar tools like the Silver Surfer (``ag``)::
 
-If it's the dynamic part, this part is a ``Thunk``. A tag string ``Thunk`` is a
-tuple of a function (``getvalue``, takes no arguments, per the above type
-signature), along with other elements that we will discuss in a moment. So this
-means we can just do the following:
+    run(sh"find {path} -print | grep '\.py$'", shell=True)
+
+If it's the **dynamic** part, it's a ``Thunk``. A tag string ``Thunk`` is a
+tuple of a function (``getvalue``, takes no arguments, as we see with its type
+signature), along with the other elements that were mentioned by not used
+(``raw``, ``conv``, ``formatspec``). To process the interpolation of the thunk,
+you would use the following steps::
 
 1. Call ``getvalue``
 2. Quote its result with ``shlex.quote``
 3. Interpolate, in this case by adding it to the ``command`` list in the above code
 
 This evaluation of the tag string then results in some arbitrary value -- in
-this case a ``str`` -- which can then be used by some API. Note that it is a
-best practice for the evaluation of the tag string to not have any side effect.
+this case a ``str`` -- which can then be used by some API, in this case
+``subprocess.run``.
+
+.. note:: Tag functions should not have visible side effects
+
+    It is a best practice for the evaluation of the tag string to not have any visible
+    side effects, such as actually running this command.
+
+    However, it can be a good idea to memoize, or do other processing to support
+    this evaluation.
+
+`html` tag
+----------
+
+TODO: initial ``html.parse`` example
+
+Recursive `html` construction
+-----------------------------
+
+TODO: extend with a marker class
+
+`fl` tag - lazy interpolation of f-strings
+------------------------------------------
+
+TODO: same semantics as f-strings, but with lazy evaluation of interpolations.
+
+`sql` tag
+---------
+
+TODO: demonstrate construction of named placeholders, along with using ``raw``
+
+`html` tag, revisited
+---------------------
+
+TODO: compilation to a virtual DOM object, such as used in Reactive
