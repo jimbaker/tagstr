@@ -79,7 +79,8 @@ Fundamentally tag strings are a straightforward generalization of f-strings:
 
 * a f-string is a sequence of strings (possibly raw, with ``fr``) and
   interpolations (including format specification and conversions, such as ``!r``
-  for ``repr``). This sequence is implicitly evaluated by concatenating.
+  for ``repr``). This sequence is **implicitly evaluated** by concatenating these
+  parts, and it results in a string.
 
 * a tag strings is a sequence of **raw** strings and **thunks**, which
   generalize such interpolations. This sequence is implicitly evaluated by calling a
@@ -104,7 +105,8 @@ So what is a thunk? It has the following type::
 
 * ``getvalue`` is the lambda-wrapped expression of the interpolation. For
   ``sh'ls -ls {path}``, ``getvalue`` is ``lambda: path``.
-* ``raw`` is the expression text of the interpolation. In this example, it's ``path``.
+* ``raw`` is the **expression text** of the interpolation. In this example, it's
+  ``path``.
 * ``conv`` is the optional conversion used, one of `r`, `s`, and `a`,
   corresponding to repr, str, and ascii conversions.
 * ``formatspec`` is the optional formatspec.
@@ -112,7 +114,8 @@ So what is a thunk? It has the following type::
 This then gives us the following generic signature for a **tag function**,
 ``some_tag``::
 
-    def some_tag(*args: str | Thunk) -> Any
+    def some_tag(*args: str | Thunk) -> Any:
+        ...
 
 Let's now write a first pass of ``sh``::
 
@@ -152,17 +155,16 @@ you would use the following steps::
 2. Quote its result with ``shlex.quote``
 3. Interpolate, in this case by adding it to the ``command`` list in the above code
 
-This evaluation of the tag string then results in some arbitrary value -- in
-this case a ``str`` -- which can then be used by some API, in this case
-``subprocess.run``.
+This implicit evaluation of the tag string, by calling the ``sh`` tag function,
+then results in some arbitrary value -- in this case a ``str`` -- which can then
+be used by some API, in this case ``subprocess.run``.
 
-.. note:: Tag functions should not have visible side effects
+.. note:: Tag functions should not have visible side effects.
 
-    It is a best practice for the evaluation of the tag string to not have any visible
-    side effects, such as actually running this command.
-
-    However, it can be a good idea to memoize, or do other processing to support
-    this evaluation.
+    It is a best practice for the evaluation of the tag string to not have any
+    visible side effects, such as actually running this command. However, it can
+    be a good idea to memoize, or perform some other processing, to support this
+    evaluation. More about this in a later section on compiling the ``html`` tag.
 
 `html` tag
 ----------
