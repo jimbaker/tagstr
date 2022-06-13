@@ -63,8 +63,9 @@ with ``shlex.quote``::
     print(run(f'ls -ls {shlex.quote(path)} | (echo "First 5 results from ls:"; head -5)', use_shell=True))
 
 However, this means that wherever you use such interpolations within a f-string,
-you need to ensure that the interpolation is properly quoted. This can be easy
-to forget. Let's fix this potential oversight by using tag string support.
+you need to ensure that the interpolation is properly quoted. This extra step can
+be easy to forget. Let's fix this potential oversight -- and lurking security
+hole -- by using tag string support.
 
 Writing a ``sh`` tag
 --------------------
@@ -75,14 +76,14 @@ interpolation for the user::
     path = 'foo; cat /etc/passwd'
     print(run(sh'ls -ls {path}', use_shell=True))
 
-Fundamentally tag strings are a straightforward generalization of f-strings:
+Fundamentally, tag strings are a straightforward generalization of f-strings:
 
 * a f-string is a sequence of strings (possibly raw, with ``fr``) and
   interpolations (including format specification and conversions, such as ``!r``
   for ``repr``). This sequence is **implicitly evaluated** by concatenating these
   parts, and it results in a string.
 
-* a tag strings is a sequence of **raw** strings and **thunks**, which
+* a tag string is a sequence of **raw** strings and **thunks**, which
   generalize such interpolations. This sequence is implicitly evaluated by calling a
   **tag function**, which can return **any value**.
 
@@ -92,7 +93,8 @@ So in the example above::
 
 ``sh`` is the tag, and it is a function with this signature:
 
-    def some_tag(*args: str | Thunk) -> str
+    def sh(*args: str | Thunk) -> str:
+        ...
 
 So what is a thunk? It has the following type::
 
@@ -135,7 +137,7 @@ Let's now write a first pass of ``sh``::
 Let's go through this code: for each arg, either it's a string (the static
 part), or an interpolation (the dynamic part).
 
-If it's the **static** part, it's shell code the developer using the ``sh`` tag
+If it's a **static** part, it's shell code the developer using the ``sh`` tag
 wrote to work with the shell. So this cannot be user input -- it's part of the
 Python code, and it is therefore can be safely used without further quoting. (Of
 course the code could have a bug, just like any other line of code in this
@@ -145,9 +147,9 @@ or similar tools like the Silver Surfer (``ag``)::
 
     run(sh"find {path} -print | grep '\.py$'", shell=True)
 
-If it's the **dynamic** part, it's a ``Thunk``. A tag string ``Thunk`` is a
+If it's a **dynamic** part, it's a ``Thunk``. A tag string ``Thunk`` is a
 tuple of a function (``getvalue``, takes no arguments, as we see with its type
-signature), along with the other elements that were mentioned by not used
+signature), along with the other elements that were mentioned but not used here
 (``raw``, ``conv``, ``formatspec``). To process the interpolation of the thunk,
 you would use the following steps::
 
