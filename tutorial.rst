@@ -22,12 +22,12 @@ Tutorial
 Tag strings start with the functionality in f-strings, as described in PEP 498.
 Let's take a look first at a simple example with f-strings::
 
-    name = 'Jim'
+    name = 'Bobby'
     s = f"Hello, {name}, it's great to meet you!"
 
 The above code is the equivalent of writing this code::
 
-    name = 'Jim'
+    name = 'Bobby'
     s = 'Hello, ' + format(name, '') + ", it's great to meet you!"
     
     # or equivalently
@@ -83,15 +83,16 @@ Fundamentally, tag strings are a straightforward generalization of f-strings:
   for ``repr``). This sequence is **implicitly evaluated** by concatenating these
   parts, and it results in a string.
 
-* a tag string is a sequence of **raw** strings and **thunks**, which
-  generalize such interpolations. This sequence is implicitly evaluated by calling a
-  **tag function**, which can return **any value**.
+* a tag string is a sequence of **raw** strings and **thunks**, which generalize
+  such interpolations. This sequence is implicitly evaluated by calling the
+  **tag function** bound to that name and which can return **any value**.
 
 So in the example above::
 
     sh'ls -ls {path}'
 
-``sh`` is the tag, and it is a function with this signature::
+``sh`` is the tag name. In evaluation, it looks up the name and applies it, just
+as with other functions. In this exanple, it is a function with this signature::
 
     def sh(*args: str | Thunk) -> str:
         ...
@@ -106,7 +107,8 @@ So what is a thunk? It has the following type::
     ]
 
 * ``getvalue`` is the lambda-wrapped expression of the interpolation. For
-  ``sh'ls -ls {path}``, ``getvalue`` is ``lambda: path``.
+  ``sh'ls -ls {path}``, ``getvalue`` is ``lambda: path``. (For any arbitary
+  expression ``expr``, it would be ``lambda: expr``.)
 * ``raw`` is the **expression text** of the interpolation. In this example, it's
   ``path``.
 * ``conv`` is the optional conversion used, one of `r`, `s`, and `a`,
@@ -140,7 +142,7 @@ part), or an interpolation (the dynamic part).
 If it's a **static** part, it's shell code the developer using the ``sh`` tag
 wrote to work with the shell. So this cannot be user input -- it's part of the
 Python code, and it is therefore can be safely used without further quoting. (Of
-course the code could have a bug, just like any other line of code in this
+course that code could have a bug, just like any other line of code in this
 program.) Note that for tag strings, this will always be a raw string. This is
 convenient for working with the shell - we might want to use regexes in ``grep``
 or similar tools like the Silver Surfer (``ag``)::
