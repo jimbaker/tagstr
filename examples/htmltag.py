@@ -157,7 +157,7 @@ def make_html_tag(f: Callable) -> Callable:
     return html_tag
 
 
-def useit():
+def demo():
     # Example usage to adapt. Subset of functionality in IDOM's vdom constructor
     def vdom(tagName: str, attributes: Dict | None, children: List | None) -> Dict:
         d = {'tagName': tagName}
@@ -190,4 +190,4 @@ def useit():
 
 
 if __name__ == '__main__':
-    useit()
+    demo()
