@@ -174,7 +174,7 @@ be used by some API, in this case ``subprocess.run``.
 ----------
 
 Tag strings also find applications where complex string interpolation would otherwise
-require a templating engine like Jinja2. Such engines typically come along with a Domain
+require a templating engine like Jinja. Such engines typically come along with a Domain
 Specific Language (DSL) for declaring templates that, given some contextual data, can be
 compiled into larger bodies of text. An especially common use case for such engines is
 the construction of HTML documents. For example, if you wanted to create a simple todo
@@ -203,8 +203,8 @@ Which will render::
     </ol>
 
 This is simple enough, but Jinja templates can grow rapidly in complexity. For example,
-if we want to dynamically set attributes on the ``<li>``
-elements the Jinja template quickly grows in complexity::
+if we want to dynamically set attributes on the ``<li>`` elements the Jinja template
+it's far less straightforward::
 
     from jinja2 import Template
 
@@ -255,8 +255,8 @@ The result of which is::
     </ol>
 
 One of the problems here is that Jinja is a generic templating tool, so the specific
-needs that come with rendering HTML aren't supported out of the box (e.g. rendering
-dynamic attributes).
+needs that come with rendering HTML, like expanding dynamic attributes, aren't supported
+out of the box.
 
 Thankfully though, string tags give us an opportunity to develop a syntax specifically
 designed to make declaring complex HTML documents easier -- we can create an ``html``
@@ -273,29 +273,17 @@ Thankfully we don't have to build our own HTML parser from scratch since Python 
 with its own ``html.parser`` module. To get started, we'll lay out the skeleton of our
 program::
 
-    ... break down htmldom.py
-
-
-Rendering a single `html` element
-.................................
-
-Our goal here will be to write a ``html`` tag which, given the following code::
-
-    color = "red"
-    value = "Code"
-    html"<li color={color}
-
-Thankfully, we don't have to start from scratch since Python comes with a built-in
-``html.parser``.
-
+    TODO: break down htmldom.py
 
 Recursive `html` construction
 .............................
 
+TODO: extend with a marker class
+
 `html` components
 .................
 
-TODO: extend with a marker class
+TODO: show how you can expand html tag to allow for HTML components
 
 `fl` tag - lazy interpolation of f-strings
 ------------------------------------------
