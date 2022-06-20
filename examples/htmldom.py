@@ -1,4 +1,5 @@
 from __future__ import annotations
+import re
 
 from typing import *
 from types import GeneratorType
@@ -40,31 +41,31 @@ class DomNode:
 
     def render(self, *, indent: int = 0, depth: int = 0) -> str:
         tab = " " * indent * depth
+
         attribute_list: list[str] = []
-
-        if (style := self.attributes.get("style")) is not None:
-            if not isinstance(style, dict):
-                raise TypeError("Expected style attribute to be a dictionary")
-            style_string = escape("; ".join(f"{k}:{v}" for k, v in style.items()))
-            attribute_list.append(f' style="{style_string}"')
-
-        for key in set(self.attributes) - {"style"}:
-            match self.attributes[key]:
-                case True:
+        for key, value in self.attributes.items():
+            match key, value:
+                case _, True:
                     attribute_list.append(f" {key}")
-                case False | None:
+                case _, False | None:
                     pass
-                case value:
+                case "style", style:
+                    if not isinstance(style, dict):
+                        raise TypeError("Expected style attribute to be a dictionary")
+                    css_string = escape("; ".join(f"{k}:{v}" for k, v in style.items()))
+                    attribute_list.append(f' style="{css_string}"')
+                case _:
                     attribute_list.append(f' {key}="{escape(str(value))}"')
 
         children_list: list[str] = []
         for item in self.children:
-            if isinstance(item, str):
-                item = escape(item, quote=False)
-            elif isinstance(item, DomNode):
-                item = item.render(indent=indent, depth=depth + 1)
-            else:
-                item = str(item)
+            match item:
+                case str():
+                    item = escape(item, quote=False)
+                case DomNode():
+                    item = item.render(indent=indent, depth=depth + 1)
+                case _:
+                    item = str(item)
             children_list.append(item)
 
         if indent:
@@ -74,7 +75,7 @@ class DomNode:
         body = "".join(children_list)
 
         if self.tag:
-            attr_body = ''.join(attribute_list)
+            attr_body = "".join(attribute_list)
             if body:
                 stuff = f"{tab}<{self.tag}{attr_body}>{body}\n{tab}</{self.tag}>"
             else:
@@ -93,46 +94,42 @@ class DomNodeParser(HTMLParser):
         self.dom = DomNode()
         self.stack = [self.dom]
         self.open_node: DomNode | None = None
-        self.interpolated_start_tag: dict[str, Any] = {}
-        self.interpolated_data: list = []
+        self.starttag_interpolations: dict[str, Any] = {}
+        self.data_interpolations: list = []
 
     def feed(self, data: str | Thunk) -> None:
         match data:
             case str():
                 super().feed(data.replace("$", "$$"))
-            case call, _, conv, spec:
-                value = _format_value(call(), conv, spec)
+            case getvalue, _, conv, spec:
+                value = _format_value(getvalue(), conv, spec)
                 if self.open_node:
-                    self.interpolated_data.append(value)
-                    super().feed(_DATA_SEP)
+                    self.data_interpolations.append(value)
+                    super().feed(_DATA_DELIMITER)
                 else:
-                    index = len(self.interpolated_start_tag)
-                    key = f"x{index}"
-                    self.interpolated_start_tag[key] = value
-                    # just insert both for now because I'm feeling lazy
-                    # we need to do this since there's a containment check
-                    # in the case there we do attribute expansion.
-                    self.interpolated_start_tag[f"${{{key}}}"] = value
+                    key = f"x{len(self.starttag_interpolations)}"
+                    self.starttag_interpolations[key] = value
                     super().feed(f"${{{key}}}")
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        tag = Template(tag).substitute(self.interpolated_start_tag)
+        tag = Template(tag).substitute(self.starttag_interpolations)
 
         attributes = {}
-        for name, value in attrs:
-            if value is None:
-                if (
-                    name in self.interpolated_start_tag
-                ):  # this containment check is a bit of a hack
-                    attributes.update(self.interpolated_start_tag[name])
-                else:
-                    _disallow_interpolation(name, "use attribute expansion instead")
-                    attributes[name] = True
-            else:
-                _disallow_interpolation(name, "use attribute expansion instead")
-                attributes[name] = Template(value).substitute(
-                    self.interpolated_start_tag
+        for key, value in attrs:
+            if value is not None:
+                _disallow_interpolation(key, "use attribute expansion instead")
+                attributes[key] = Template(value).substitute(
+                    self.starttag_interpolations
                 )
+            elif (match := _TEMPLATE_PLACEHOLDER_PATTERN.match(key)) is not None:
+                # A valid template placeholder should always have a corresponding interpolation
+                attribute_expansion = self.starttag_interpolations[match.group(1)]
+                if not isinstance(attribute_expansion, dict):
+                    raise TypeError("Expected a dictionary for attribute expension")
+                attributes.update(attribute_expansion)
+            else:
+                _disallow_interpolation(key, "use attribute expansion instead")
+                attributes[key] = True
 
         this_node = DomNode(tag, attributes)
         last_node = self.stack[-1]
@@ -141,21 +138,23 @@ class DomNodeParser(HTMLParser):
 
         self.open_node = this_node
 
-        self.interpolated_start_tag.clear()
+        self.starttag_interpolations.clear()
 
     def handle_data(self, data: str) -> None:
         assert self.open_node
 
         interleaved_children = []
-        for string, interp in zip(data.split(_DATA_SEP), self.interpolated_data + [""]):
-            interleaved_children.append(string)
-            if isinstance(interp, (list, tuple, GeneratorType)):
-                interleaved_children.extend(interp)
+        for dat, val in zip(
+            data.split(_DATA_DELIMITER), self.data_interpolations + [""]
+        ):
+            interleaved_children.append(dat)
+            if isinstance(val, (list, tuple, GeneratorType)):
+                interleaved_children.extend(val)
             else:
-                interleaved_children.append(interp)
+                interleaved_children.append(val)
 
         self.open_node.children.extend(c for c in interleaved_children if c != "")
-        self.interpolated_data.clear()
+        self.data_interpolations.clear()
         self.open_node = None
 
     def handle_endtag(self, tag: str) -> None:
@@ -163,7 +162,14 @@ class DomNodeParser(HTMLParser):
         self.stack.pop()
 
 
-_DATA_SEP = "{$}"
+# We choose this symbol because, after replacing all $ with $$, there is no way for a
+# user to feed a string that would result in {$}. Thus we can reliably split an HTML
+# data string on {$}.
+_DATA_DELIMITER = "{$}"
+
+
+# Use this to grab the name of a template placeholder (e.g. ${name})
+_TEMPLATE_PLACEHOLDER_PATTERN = re.compile(r"^\${(\w[\w\d)]*)}$")
 
 
 def _format_value(value: Any, conv: str, spec: str) -> Any | str:

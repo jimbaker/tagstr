@@ -177,7 +177,7 @@ Tag strings also find applications where complex string interpolation would othe
 require a templating engine like Jinja2. Such engines typically come along with a Domain
 Specific Language (DSL) for declaring templates that, given some contextual data, can be
 compiled into larger bodies of text. An especially common use case for such engines is
-the construction of HTML documents. For example, if we wanted to create a simple todo
+the construction of HTML documents. For example, if you wanted to create a simple todo
 list using Jinja it might look something like this::
 
     from jinja2 import Template
