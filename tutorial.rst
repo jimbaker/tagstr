@@ -29,9 +29,9 @@ The above code is the equivalent of writing this code::
 
     name = 'Bobby'
     s = 'Hello, ' + format(name, '') + ", it's great to meet you!"
-    
+
     # or equivalently
-    
+
     s = ''.join(['Hello, ', format(name, ''), ", it's great to meet you!"])
 
 Here we see that the f-string syntax has a compact syntax for combining into one
@@ -173,10 +173,127 @@ be used by some API, in this case ``subprocess.run``.
 `html` tag
 ----------
 
-TODO: initial ``html.parse`` example
+Tag strings also find applications where complex string interpolation would otherwise
+require a templating engine like Jinja2. Such engines typically come along with a Domain
+Specific Language (DSL) for declaring templates that, given some contextual data, can be
+compiled into larger bodies of text. An especially common use case for such engines is
+the construction of HTML documents. For example, if we wanted to create a simple todo
+list using Jinja it might look something like this::
+
+    from jinja2 import Template
+
+    t = Template("""
+    <h1>{{ title }}</h1>
+    <ol>{% for item in list_items %}
+        <li>{{ item }}</li>{% endfor %}
+    </ol>
+    """)
+
+    doc = t.render(title="My Todo List", list_items=["Eat", "Code", "Sleep"])
+
+    print(doc)
+
+Which will render::
+
+    <h1>My Todo List</h1>
+    <ol>
+        <li>Eat</li>
+        <li>Code</li>
+        <li>Sleep</li>
+    </ol>
+
+This is simple enough, but Jinja templates can grow rapidly in complexity. For example,
+if we want to dynamically set attributes on the ``<li>``
+elements the Jinja template quickly grows in complexity::
+
+    from jinja2 import Template
+
+    t = Template(
+        """
+    <h1>{{ title }}</h1>
+    <ol>{% for item in list_items %}
+        <li {% for key, value in item["attributes"].items() %}{{ key }}={{ value }} {% endfor %}>
+            {{ item["value"] }}
+        </li>{% endfor %}
+    </ol>
+    """
+    )
+
+    doc = t.render(
+        title="My Todo List",
+        list_items=[
+            {
+                "attributes": {"value": "'3'"},
+                "value": "Eat",
+            },
+            {
+                "attributes": {"style": "'font-weight: bold'"},
+                "value": "Eat",
+            },
+            {
+                "attributes": {"type": "'a'", "style": "'font-weight: bold'"},
+                "value": "Eat",
+            },
+        ],
+    )
+
+    print(doc)
+
+The result of which is::
+
+    <h1>My Todo List</h1>
+    <ol>
+        <li value='3' >
+            Eat
+        </li>
+        <li style='font-weight: bold' >
+            Eat
+        </li>
+        <li type='a' style='font-weight: bold' >
+            Eat
+        </li>
+    </ol>
+
+One of the problems here is that Jinja is a generic templating tool, so the specific
+needs that come with rendering HTML aren't supported out of the box (e.g. rendering
+dynamic attributes).
+
+Thankfully though, string tags give us an opportunity to develop a syntax specifically
+designed to make declaring complex HTML documents easier -- we can create an ``html``
+tag which, similarly to JSX, would render HTML documents in the following way::
+
+    children = ["Hello, ", "world!"]
+    attributes = {"color": "blue", "style": {"font-style": "bold", "font-family": "mono"}}
+    assert (
+        html"<h1 { attributes }>{ children }</h1>"
+        == '<h1 color="blue" style="font-style: bold; font-family: mono;">Hello world!</h1>'
+    )
+
+Thankfully we don't have to build our own HTML parser from scratch since Python comes
+with its own ``html.parser`` module. To get started, we'll lay out the skeleton of our
+program::
+
+    ... break down htmldom.py
+
+
+Rendering a single `html` element
+.................................
+
+Our goal here will be to write a ``html`` tag which, given the following code::
+
+    color = "red"
+    value = "Code"
+    html"<li color={color}
+
+Thankfully, we don't have to start from scratch since Python comes with a built-in
+``html.parser``.
+
 
 Recursive `html` construction
------------------------------
+.............................
+
+`html` components
+.................
 
 TODO: extend with a marker class
 
