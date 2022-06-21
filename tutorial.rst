@@ -399,8 +399,13 @@ the fact that it must interpolate values from thunks into the resulting HtmlNode
 To get to grips with how to proceed, its useful to consider how one might implement a
 ``SimpleHtmlBuilder`` which does not interpolate values::
 
+    # TODO: add comments to the code
+
     class SimpleHtmlBuilder(HTMLParser):
         """Construct HtmlNodes from strings and thunks"""
+
+        root: HtmlNode
+        stack: list[HtmlNode]
 
         def reset(self):
             self.root = HtmlNode()
@@ -418,13 +423,7 @@ To get to grips with how to proceed, its useful to consider how one might implem
                 return root
 
         def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-            attrs_dict = {}
-            for key, value in attrs:
-                if value is None:
-                    attrs_dict[key] = True
-                else:
-                    attrs_dict[key] = value
-            this_node = HtmlNode(tag, attrs_dict)
+            this_node = HtmlNode(tag, {k, True if v is None else v for k, v in attrs.items()})
             last_node = self.stack[-1]
             last_node.children.append(this_node)
             self.stack.append(this_node)
@@ -434,6 +433,34 @@ To get to grips with how to proceed, its useful to consider how one might implem
 
         def handle_endtag(self, tag: str) -> None:
             self.stack.pop()
+
+.. note::
+
+    This implementation includes a minor editorial decision in the handling of boolean HTML
+    attributes. Where ``HTMLParser`` treats the value of such attributes as ``None``
+    ``SimpleHtmlBuilder`` converts them to ``True``.
+
+The key insight of ``SimpleHtmlBuilder`` is that, in order to create the tree of
+``HtmlNode`` objects, you must keep track of the node which is currently being
+constructed using stack data structure. Knowing this, the main work is in keeping the
+stack up to date. This involves appending to the stack at each ``handle_starttag()``
+call and then popping at each ``handle_endtag()`` call. In this way, when
+``handle_data()`` is called, the builder knows which node to append a child to.
+
+The remaining detail of ``result()`` is to handle the case where one or more elements
+lie at the root of the document passed to the parser. In the case where there's more
+than one node which has been constructed within the ``root``, the solution is to return
+the root itself which is "untagged." That is, its tag is an empty string and it has no
+attributes. This is how it works in practice::
+
+    builder = SimpleHtmlBuilder()
+    builder.feed("<h1/><h2/>")
+    assert builder.result() == HtmlNode(children=[HtmlNode("h1"), HtmlNode("h2")])
+
+.. note::
+
+    Untagged nodes do not show up in the rendered HTML - only their children do.
+
 
 
 Recursive ``html`` construction

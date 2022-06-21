@@ -70,16 +70,18 @@ class HtmlNode:
 
         body = "".join(children_list)
 
-        if self.tag:
+        if not self.tag:
+            if self.attributes:
+                raise ValueError("Untagged node cannot have attributes.")
+            result = body
+        else:
             attr_body = "".join(attribute_list)
             if body:
-                stuff = f"{tab}<{self.tag}{attr_body}>{body}\n{tab}</{self.tag}>"
+                result = f"{tab}<{self.tag}{attr_body}>{body}\n{tab}</{self.tag}>"
             else:
-                stuff = f"{tab}<{self.tag}{attr_body}>{body}</{self.tag}>"
-        elif self.attributes:
-            raise ValueError("Untagged node cannot have children.")
+                result = f"{tab}<{self.tag}{attr_body}>{body}</{self.tag}>"
 
-        return stuff
+        return result
 
     __str__ = render
 
