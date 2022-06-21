@@ -5,37 +5,11 @@ from dataclasses import dataclass
 from functools import cached_property
 from typing import *
 
-from taglib import decode_raw, Thunk
+from taglib import decode_raw, format_value, Thunk
 
 
 def just_like_f_string(*args: str | Thunk) -> str:
-    parts = []
-    for arg in decode_raw(*args):
-        match arg:
-            case str():
-                parts.append(arg)
-            case getvalue, _, conv, spec:
-                value = getvalue()
-                match conv:
-                    case 'r': value = repr(value)
-                    case 's': value = str(value)
-                    case 'a': value = ascii(value)
-                    case None: pass
-                    case _: raise ValueError(f'Bad conversion: {conv!r}')
-                parts.append(format(value, spec if spec is not None else ''))
-    return ''.join(parts)
-
-
-@dataclass
-class LazyFString:
-    args: Sequence[str | Thunk]
-
-    def __str__(self) -> str:
-        return self.value
-
-    @cached_property
-    def value(self) -> str:
-        return just_like_f_string(*self.args)
+    return ''.join((format_value(arg) for arg in decode_raw(*args)))
 
 
 @dataclass
