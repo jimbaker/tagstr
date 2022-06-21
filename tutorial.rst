@@ -183,7 +183,103 @@ TODO: extend with a marker class
 `fl` tag - lazy interpolation of f-strings
 ------------------------------------------
 
-TODO: same semantics as f-strings, but with lazy evaluation of interpolations.
+Up until now your tags always call the ``getvalue`` element in the thunk. Recall
+that ``getvalue`` is the lambda that implicitly wraps each interpolation
+expression. Let's consider a case when you may not want to **eagerly**
+call ``getvalue``, but instead do so **lazily**. In doing so, we can avoid
+the overhead of expensive computations unless the tag is actually rendered.
+
+With this mind, you can write a lazy version of f-strings with a ``fl`` tag,
+which returns an object that does the interpolation only if it is called with
+``__str__`` to get the string.
+
+Start by adding the following function to ``taglib``, since it's generally
+useful. (FIXME: refactor such that it is presented when the tutorial first
+covers conversions and formatting.) ::
+
+    def format_value(arg: str | Thunk) -> str:
+        match arg:
+            case str():
+                return arg
+            case getvalue, _, conv, spec:
+                value = getvalue()
+                match conv:
+                    case 'r': value = repr(value)
+                    case 's': value = str(value)
+                    case 'a': value = ascii(value)
+                    case None: pass
+                    case _: raise ValueError(f'Bad conversion: {conv!r}')
+                return format(value, spec if spec is not None else '')
+
+Now write the following function, which implements the PEP 498 semantics of
+f-strings::
+
+    def just_like_f_string(*args: str | Thunk) -> str:
+        return ''.join((format_value(arg) for arg in decode_raw(*args)))
+
+With this tag function (we will use it later in implementing another tag, but it
+has the required signature for tags), you can now use it interchangeabley with
+f-strings. Let's use the starting example of this tutorial to verify::
+
+    name = 'Bobby'
+    s = just_like_f_string"Hello, {name}, it's great to meet you!"
+
+Note ``just_like_f_string`` results in the same concatenation of formatted
+values.
+
+So far, this functionality is not so interesting. But let's add some extra
+indirection to get lazy behavior. Start by defining the ``LazyFString``
+dataclass, along with the necessary imports::
+
+    from dataclasses import dataclass
+    from functools import cached_property
+    from typing import *
+
+    @dataclass
+    class LazyFString:
+        args: Sequence[str | Thunk]
+
+        def __str__(self) -> str:
+            return self.value
+
+        @cached_property
+        def value(self) -> str:
+            return just_like_f_string(*self.args)
+
+The ``cached_property`` decorator defers the evaluation of the construction of
+the ``str`` from ``just_like_f_string`` until it is actually used. It is then
+cached until a given ``LazyFString`` object is garbage collected, as usual. Now
+write the tag function::
+
+    def fl(*args: str | Thunk) -> LazyFString:
+        return LazyFString(args)
+
+You can now use the ``fl`` tag. Try it with logging. Let's assume the default
+logging level -- so all message with at least ``WARNING`` will be logged::
+
+    import logging  # add required import
+
+    def report_called(f):
+        @wraps(f)
+        def wrapper(*args, **kwds):
+            print('Calling wrapped function', f)
+            return f(*args, **kwds)
+        return wrapper
+
+    @report_called
+    def expensive_fn():
+        return 42  # ultimate answer takes some time to compute! :)
+
+    # Nothing is logged; neither report_called nor expensive_fn are called
+    logging.info(fl'Expensive function: {expensive_fn()}')
+
+    # However the following log statement is logged, and now expensive_fn is
+    # actually called
+    logging.warning(fl'Expensive function: {expensive_fn()}')
+
+NOTE: This demo code implements the ``fl`` tag such that it has the same user
+behavior as described in https://github.com/python/cpython/issues/77135. You can
+further extend this example by looking at other possible caching.
 
 `sql` tag
 ---------
