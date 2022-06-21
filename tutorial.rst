@@ -171,8 +171,8 @@ be used by some API, in this case ``subprocess.run``.
     evaluation. More about this in a later section on compiling the ``html`` tag.
 
 
-Writing an `html` tag
----------------------
+Applications in templating
+--------------------------
 
 Tag strings also find applications where complex string interpolation would otherwise
 require a templating engine like Jinja. Such engines typically come along with a Domain
@@ -350,13 +350,90 @@ and trigger them later::
     assert handlers == {handle_onclick_id: handle_onclick}
 
 
-The skeleton of an ``html`` tag
-...............................
+Writing an ``html`` tag
+.......................
 
 In contrast to the ``sh`` tag, which did not need to do any parsing, the ``html`` tag
-must parse the HTML it receives since, to it needs to know the  it must know the
-semantic meaning of values it will interpolate.
+must parse the HTML it receives since, in order to perform attribute expansions and
+recursive construction it needs to know the semantic meaning of values it will
+interpolate. Thankfully though, Python comes with a built in ``html.parser`` module that
+that we can build atop. Given this, the implementation of ``html`` will look a bit like
+this::
 
+    from html.parser import HTMLParser
+
+    def html(*args: str | Thunk) -> HtmlNode:
+        builder = HtmlBuilder()
+        for data in args:
+            builder.feed(data)
+        return builder.result()
+
+    @dataclass
+    class HtmlNode:
+        """A single HTML document object model node"""
+
+        tag: str = field(default_factory=str)
+        attributes: HtmlAttributes = field(default_factory=dict)
+        children: HtmlChildren = field(default_factory=list)
+
+        def render(self) -> str: ...
+
+    class HtmlBuilder(HTMLParser):
+        """Construct HtmlNodes from strings and thunks"""
+
+        def feed(self, data: str | Thunk) -> None: ...
+        def result(self) -> HtmlNode: ...
+
+        def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None: ...
+        def handle_data(self, data: str) -> None: ...
+        def handle_endtag(self, tag: str) -> None: ...
+
+Where the ``html`` tag will feed each of its strings and thunks to an ``HtmlBuilder``
+until its ``args`` have been exhausted. At which point it can return the resulting
+interpolated tree of ``HtmlNode`` objects. ``HtmlBuilder`` then, being a subclass of
+``HTMLParser``, will implement the necessary ``handle_*`` methods to accomplish this.
+
+The vast majority of the work in implementing the ``html`` tag lies in the
+``HtmlBuilder``. Further, much of the difficulties in its implementations stem from
+the fact that it must interpolate values from thunks into the resulting HtmlNode tree.
+To get to grips with how to proceed, its useful to consider how one might implement a
+``SimpleHtmlBuilder`` which does not interpolate values::
+
+    class SimpleHtmlBuilder(HTMLParser):
+        """Construct HtmlNodes from strings and thunks"""
+
+        def reset(self):
+            self.root = HtmlNode()
+            self.stack = [self.root]
+            super().reset()
+
+        def result(self) -> HtmlNode:
+            root = self.root
+            self.close()
+            if (len_root_children := len(self.root.children)) == 0:
+                raise ValueError("Nothing to return")
+            elif len_root_children == 1:
+                return root.children[0]
+            else:
+                return root
+
+        def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+            attrs_dict = {}
+            for key, value in attrs:
+                if value is None:
+                    attrs_dict[key] = True
+                else:
+                    attrs_dict[key] = value
+            this_node = HtmlNode(tag, attrs_dict)
+            last_node = self.stack[-1]
+            last_node.children.append(this_node)
+            self.stack.append(this_node)
+
+        def handle_data(self, data: str) -> None:
+            self.stack[-1].append(data)
+
+        def handle_endtag(self, tag: str) -> None:
+            self.stack.pop()
 
 
 Recursive ``html`` construction

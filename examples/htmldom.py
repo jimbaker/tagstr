@@ -22,22 +22,18 @@ def html(*args: str | Thunk) -> str:
     parser = HtmlNodeParser()
     for arg in decode_raw(*args):
         parser.feed(arg)
-    root_node = parser.dom
-    if len(root_node.children) == 1:
-        return root_node.children[0]
-    else:
-        return root_node
+    return parser.close()
 
 
-DomNodeChildren = list[str, "HtmlNode"]
-DomNodeAttributes = dict[str, str | bool | dict[str, str]]
+HtmlChildren = list[str, "HtmlNode"]
+HtmlAttributes = dict[str, str | bool | dict[str, str]]
 
 
 @dataclass
 class HtmlNode:
     tag: str = field(default_factory=str)
-    attributes: DomNodeAttributes = field(default_factory=dict)
-    children: DomNodeChildren = field(default_factory=list)
+    attributes: HtmlAttributes = field(default_factory=dict)
+    children: HtmlChildren = field(default_factory=list)
 
     def render(self, *, indent: int = 0, depth: int = 0) -> str:
         tab = " " * indent * depth
@@ -91,8 +87,8 @@ class HtmlNode:
 class HtmlNodeParser(HTMLParser):
     def __init__(self):
         super().__init__()
-        self.dom = HtmlNode()
-        self.stack = [self.dom]
+        self.root = HtmlNode()
+        self.stack = [self.root]
         self.open_node: HtmlNode | None = None
         self.starttag_interpolations: dict[str, Any] = {}
         self.data_interpolations: list = []
@@ -110,6 +106,13 @@ class HtmlNodeParser(HTMLParser):
                     key = f"x{len(self.starttag_interpolations)}"
                     self.starttag_interpolations[key] = value
                     super().feed(f"${{{key}}}")
+
+    def result(self) -> HtmlNode:
+        root = self.root
+        if len(root.children) == 1:
+            return root.children[0]
+        else:
+            return root
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         tag = Template(tag).substitute(self.starttag_interpolations)
@@ -173,22 +176,7 @@ _TEMPLATE_PLACEHOLDER_PATTERN = re.compile(r"^\${(\w[\w\d)]*)}$")
 
 
 def _format_value(value: Any, conv: str, spec: str) -> Any | str:
-    if not conv and not spec:
-        return value
 
-    match conv:
-        case "r":
-            value = repr(value)
-        case "s":
-            value = str(value)
-        case "a":
-            value = ascii(value)
-        case None:
-            pass
-        case _:
-            raise ValueError(f"Bad conversion: {conv!r}")
-
-    return format(value, spec)
 
 
 def _disallow_interpolation(string: str, reason: str) -> None:
