@@ -19,7 +19,7 @@ def demo():
 
 
 def html(*args: str | Thunk) -> str:
-    parser = DomNodeParser()
+    parser = HtmlNodeParser()
     for arg in decode_raw(*args):
         parser.feed(arg)
     root_node = parser.dom
@@ -29,12 +29,12 @@ def html(*args: str | Thunk) -> str:
         return root_node
 
 
-DomNodeChildren = list[str, "DomNode"]
+DomNodeChildren = list[str, "HtmlNode"]
 DomNodeAttributes = dict[str, str | bool | dict[str, str]]
 
 
 @dataclass
-class DomNode:
+class HtmlNode:
     tag: str = field(default_factory=str)
     attributes: DomNodeAttributes = field(default_factory=dict)
     children: DomNodeChildren = field(default_factory=list)
@@ -62,7 +62,7 @@ class DomNode:
             match item:
                 case str():
                     item = escape(item, quote=False)
-                case DomNode():
+                case HtmlNode():
                     item = item.render(indent=indent, depth=depth + 1)
                 case _:
                     item = str(item)
@@ -88,12 +88,12 @@ class DomNode:
     __str__ = render
 
 
-class DomNodeParser(HTMLParser):
+class HtmlNodeParser(HTMLParser):
     def __init__(self):
         super().__init__()
-        self.dom = DomNode()
+        self.dom = HtmlNode()
         self.stack = [self.dom]
-        self.open_node: DomNode | None = None
+        self.open_node: HtmlNode | None = None
         self.starttag_interpolations: dict[str, Any] = {}
         self.data_interpolations: list = []
 
@@ -131,7 +131,7 @@ class DomNodeParser(HTMLParser):
                 _disallow_interpolation(key, "use attribute expansion instead")
                 attributes[key] = True
 
-        this_node = DomNode(tag, attributes)
+        this_node = HtmlNode(tag, attributes)
         last_node = self.stack[-1]
         last_node.children.append(this_node)
         self.stack.append(this_node)

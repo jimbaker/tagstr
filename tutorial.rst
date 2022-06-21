@@ -170,8 +170,9 @@ be used by some API, in this case ``subprocess.run``.
     be a good idea to memoize, or perform some other processing, to support this
     evaluation. More about this in a later section on compiling the ``html`` tag.
 
-`html` tag
-----------
+
+Writing an `html` tag
+---------------------
 
 Tag strings also find applications where complex string interpolation would otherwise
 require a templating engine like Jinja. Such engines typically come along with a Domain
@@ -256,26 +257,109 @@ The result of which is::
 
 One of the problems here is that Jinja is a generic templating tool, so the specific
 needs that come with rendering HTML, like expanding dynamic attributes, aren't supported
-out of the box.
+out of the box. More broadly, Jinja templates make it difficult to coordinate business
+and UI logic since markup in the template is kept separate from your logic in Python.
 
 Thankfully though, string tags give us an opportunity to develop a syntax specifically
-designed to make declaring complex HTML documents easier -- we can create an ``html``
-tag which, similarly to JSX, would render HTML documents in the following way::
+designed to make declaring elaborate HTML documents easier. In the tutorial to follow,
+you'll learn how to create an ``html`` tag which can do just this. Specifically, we'll
+be taking inspiration from the JSX in order to bring your markup and logic closer
+together. Here's a couple examples of what it will be able to do that would be
+challenging to do with a standard templating solution::
 
-    children = ["Hello, ", "world!"]
-    attributes = {"color": "blue", "style": {"font-style": "bold", "font-family": "mono"}}
+    # Attribute expansion
+    attributes = {"color": "blue", "style": {"font-style": "bold"}}
     assert (
-        html"<h1 { attributes }>{ children }</h1>"
-        == '<h1 color="blue" style="font-style: bold; font-family: mono;">Hello world!</h1>'
+        html"<h1 {attributes}>Hello, world!</h1>".render()
+        == '<h1 color="blue" style="font-style:bold">Hello, world!<h1>'
     )
 
-Thankfully we don't have to build our own HTML parser from scratch since Python comes
-with its own ``html.parser`` module. To get started, we'll lay out the skeleton of our
-program::
+    # Recursive construction
+    assert (
+        html"<body>{html"<h{i}/>" for i in range(1, 4)}</body>".render()
+        == "<body><h1></h1><h2></h2><h3></h3></body>"
+    )
 
-    TODO: break down htmldom.py
+Perhaps most interestingly though, this ``html`` tag will output a structured
+representation of the HTML which can be freely manipulated - a Document Object Model
+(DOM) of sorts for HTML::
 
-Recursive `html` construction
+    node: HtmlNode = html"<h1/>"
+    node.attributes["color"] = "blue"
+    node.children.append("Hello, world!")
+    assert node.render() == '<h1 color="blue">Hello, world!</h1>'
+
+Where ``HtmlNode`` is defined as:
+
+
+    HtmlAttributes = dict[str, Any]
+    HtmlChildren = list[str, "HtmlNode"]
+
+    class HtmlNode:
+        """A single HTML document object model node"""
+
+        type: str
+        attributes: HtmlAttributes
+        children: HtmlChildren
+
+        def render(self) -> str:
+            ...
+
+This capability in particular is one which would be impossible, or at the very least
+convoluted, to achieve with a templating engine like Jinja. By returning a DOM instead
+of a string, this ``html`` tag allows for a much broader set of uses.
+
+NOTE: we should probably come up with a simpler example than the one below
+
+For example, while we can't strictly embed callbacks into any HTML we render, we can
+correspond them with an ID which a client could send as part of an event. With this in
+mind, we could trace the DOM for functions that have been assigned to
+``HtmlNode.attributes`` in order to replace them with an ID that could used to relocate
+and trigger them later::
+
+    EventHandlers = dict[str, Callable[..., Any]]
+
+    def load_event_handlers(node: HtmlNode) -> DomNode, EventHandlers:
+        handlers = handlers or {}
+
+        new_attributes: HtmlAttributes = {}
+        for k, v in node.attributes.items():
+            if isinstance(v, callable):
+                handler_id = id(v)
+                handlers[handler_id] = v
+                new_attributes[f"data-handle-{k}"] = handler_id
+            else:
+                new_attributes[k] = v
+
+        new_children: HtmlChildren = []
+        for child in node.children:
+            if isinstance(child, HtmlNode):
+                child, child_handlers = load_event_handlers(child)
+                handlers.update(child_handlers)
+            new_children.append(child)
+
+        return HtmlNode(type=node.type, attributes=new_attributes, children=new_children)
+
+    handle_onclick = lambda event: ...
+    handle_onclick_id = id(handle_onclick)
+
+    button = html"<button onclick={handle_onclick} />"
+    button, handlers = load_event_handlers(button)
+
+    assert button.render() == f'<button data-handle-onclick="{handle_onclick_id}" />'
+    assert handlers == {handle_onclick_id: handle_onclick}
+
+
+The skeleton of an ``html`` tag
+...............................
+
+In contrast to the ``sh`` tag, which did not need to do any parsing, the ``html`` tag
+must parse the HTML it receives since, to it needs to know the  it must know the
+semantic meaning of values it will interpolate.
+
+
+
+Recursive ``html`` construction
 .............................
 
 TODO: extend with a marker class
