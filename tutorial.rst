@@ -264,14 +264,13 @@ Thankfully though, string tags give us an opportunity to develop a syntax specif
 designed to make declaring elaborate HTML documents easier. In the tutorial to follow,
 you'll learn how to create an ``html`` tag which can do just this. Specifically, we'll
 be taking inspiration from the JSX in order to bring your markup and logic closer
-together. Here's a couple examples of what it will be able to do that would be
-challenging to do with a standard templating solution::
+together. Here's a couple examples of what it will be able to do::
 
     # Attribute expansion
-    attributes = {"color": "blue", "style": {"font-style": "bold"}}
+    attributes = {"color": "blue", "style": {"font-weight": "bold"}}
     assert (
         html"<h1 {attributes}>Hello, world!</h1>".render()
-        == '<h1 color="blue" style="font-style:bold">Hello, world!<h1>'
+        == '<h1 color="blue" style="font-weight:bold">Hello, world!<h1>'
     )
 
     # Recursive construction
@@ -280,8 +279,9 @@ challenging to do with a standard templating solution::
         == "<body><h1></h1><h2></h2><h3></h3></body>"
     )
 
-Perhaps most interestingly though, this ``html`` tag will output a structured
-representation of the HTML which can be freely manipulated - a Document Object Model
+While this would certainly be difficult to achieve with a standard templating solution,
+what's perhaps more interesting is that this ``html`` tag will output a structured
+representation of the HTML that can be freely manipulated - a Document Object Model
 (DOM) of sorts for HTML::
 
     node: HtmlNode = html"<h1/>"
@@ -409,18 +409,15 @@ To get to grips with how to proceed, its useful to consider how one might implem
     class SimpleHtmlBuilder(HTMLParser):
         """Construct HtmlNodes from strings and thunks"""
 
-        root: HtmlNode
-        stack: list[HtmlNode]
-
-        def reset(self):
+        def __init__(self):
+            super().__init__()
             self.root = HtmlNode()
             self.stack = [self.root]
-            super().reset()
 
         def result(self) -> HtmlNode:
             root = self.root
             self.close()
-            if (len_root_children := len(self.root.children)) == 0:
+            if (len_root_children := len(root.children)) == 0:
                 raise ValueError("Nothing to return")
             elif len_root_children == 1:
                 return root.children[0]
@@ -474,37 +471,92 @@ An HTML builder with interpolation
 ..................................
 
 Having learned how to turn HTML strings into a tree of ``HtmlNode`` objects, focus can
-shift towards adding interpolation and creating the final ``HtmlBuilder`` class. Doing
-so will first require that the ``HtmlBuilder.feed`` method is modified to accept both
-strings and Thunks. The approach taken here will be to replace each encountered Thunk
-with a placeholder string that can be fed to the parser. Then, by tracking Thunks in
-relation to their placeholders, the location of a given interpolated value in the HTML
-can be identified. For example, given the following tag string::
+shift towards adding interpolation and creating the final ``HtmlBuilder`` class. To
+create this ``HtmlBuilder`` class it will be necessary to implement a ``feed()`` method
+that can accept both strings and Thunks. The approach taken here will be to feed a
+placeholder string to the parser each time a Thunk is encountered, and to append the
+value of that Thunk's expression to a list. For example, given the following tag
+string::
 
-    heading_size = 1
+    html"<{tag} style={style} color=blue>{greeting}, {name}!</{tag}>"
+
+The ``feed()`` method will substituted each expression with a placeholder ``{$}`` such
+that the parser receives the string::
+
+    "<{$} style={$} color=blue>{$}, {$}!</{$}>"
+
+The implementation of this logic can be written as::
+
+    from taglib import format_value
+
+    PLACEHOLDER = "{$}"
+
+    class HtmlBuilder(HTMLParser):
+
+        def __init__(self):
+            super().__init__()
+            self.root = HtmlNode()
+            self.stack = [self.root]
+            self.values: list[Any] = []
+
+        def feed(self, data: string | Thunk) -> None:
+            match data:
+                case str():
+                    super().feed(data)
+                case getvalue, _, conv, spec:
+                    self.values.append(
+                        format_value(getvalue(), conv, spec)
+                        if conv or spec else
+                        getvalue()
+                    )
+                    super().feed(PLACEHOLDER)
+
+However, having done this, it will necessary to reconnect each instance of the
+placeholder with its corresponding expression value when implementing
+``handle_starttag`` and ``handle_data``. The easiest way to do this is to split the
+substituted string on the placeholder and zip the split string back together with the
+expression values::
+
+    def interleave_values(string: str, values: list[Any]) -> tuple[list[str | Any], list[Any]]:
+        string_parts = string.replace("$", "$$").split(PLACEHOLDER)
+
+        interleaved_values: list[str] = []
+        for s, v in zip(string_parts[:-1], values):
+            interleaved_values.append(s.replace("$$", "$"))
+            interleaved_values.append(v)
+        interleaved_values.append(string_parts[-1])
+
+        return (
+            interleaved_values,
+            # In case we don't use all the values, return those that remain.
+            values[len(string_parts) - 1 :]
+        )
+
+.. note::
+
+    The ``PLACEHOLDER`` has been selected to be ``{$}`` because, after replacing all
+    ``$`` with ``$$``, there is no way for a user to feed a string that would result in
+    ``{$}``. Thus we can reliably identify any remaining ``{$}`` to be placeholders.
+
+Absent the parser, you could put ``interleave_values`` to use like this::
+
+    tag = "h1"
     style = {"font-weight": "bold"}
     greeting = "Hello"
-    name = "Sam"
-    html"<h{heading_size} style={style}>{greeting}, {name}!</h1>"
+    name = "Alice"
 
-Internally, substituting each expression with ``{$}`` would produce a string that could
-be fed to the parser as::
+    substituted_string = "<{$} style={$} color=blue>{$}, {$}!</{$}>"
+    values = [tag, style, greeting, name, tag]
 
-    "<h{$} style={$}>{$}, {$}<h1>"
+    result, _ = interleave_values(substituted_string, value)
+    assert result == ["<", tag, " style=", style, "color=blue>", greeting, ", ", name, "!</", tag, ">"]
 
-With the expression values held in a list based on the order they were encountered:
+Now in this case all expression values were used while interleaving the values. In the
+context of ``handle_starttag(tag, attrs)`` it won't necessarily be clear how many values
+should be consumed ahead of time. For example, in the ``attrs`` list, the ``style``
+attribute contains a substituted value but ``color`` does not. Thus, each time
+``interleave_values`` is called the remaining values need to be updated.
 
-    [heading_size, style, greeting, name]
-
-Then, in ``handle_starttag`` and ``handle_data``, the expression value associated with
-each placeholder can be recovered by interleaving the parsed HTML components with the
-stored values.
-
-
-Recursive ``html`` construction
-.............................
-
-TODO: extend with a marker class
 
 `html` components
 .................
