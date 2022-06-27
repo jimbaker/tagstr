@@ -1,9 +1,7 @@
 from __future__ import annotations
-import re
 
 from typing import *
 from types import GeneratorType
-from string import Template
 from dataclasses import dataclass, field
 from html import escape
 from html.parser import HTMLParser
@@ -22,7 +20,7 @@ def html(*args: str | Thunk) -> str:
     parser = HtmlNodeParser()
     for arg in decode_raw(*args):
         parser.feed(arg)
-    return parser.close()
+    return parser.result()
 
 
 HtmlChildren = list[str, "HtmlNode"]
@@ -86,28 +84,26 @@ class HtmlNode:
     __str__ = render
 
 
+# We choose this symbol because, after replacing all $ with $$, there is no way for a
+# user to feed a string that would result in {$}. Thus we can reliably split an HTML
+# data string on {$}.
+PLACEHOLDER = "{$}"
+
+
 class HtmlNodeParser(HTMLParser):
     def __init__(self):
         super().__init__()
         self.root = HtmlNode()
         self.stack = [self.root]
-        self.open_node: HtmlNode | None = None
-        self.starttag_interpolations: dict[str, Any] = {}
-        self.data_interpolations: list = []
+        self.values: list[Any] = []
 
     def feed(self, data: str | Thunk) -> None:
         match data:
             case str():
                 super().feed(data.replace("$", "$$"))
             case getvalue, _, conv, spec:
-                value = _format_value(getvalue(), conv, spec)
-                if self.open_node:
-                    self.data_interpolations.append(value)
-                    super().feed(_DATA_DELIMITER)
-                else:
-                    key = f"x{len(self.starttag_interpolations)}"
-                    self.starttag_interpolations[key] = value
-                    super().feed(f"${{{key}}}")
+                self.values.append(_format_value(getvalue(), conv, spec))
+                super().feed(PLACEHOLDER)
 
     def result(self) -> HtmlNode:
         root = self.root
@@ -117,74 +113,85 @@ class HtmlNodeParser(HTMLParser):
             return root
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        tag = Template(tag).substitute(self.starttag_interpolations)
+        tag, self.values = join_with_values(tag, self.values)
 
         attributes = {}
-        for key, value in attrs:
-            if value is not None:
-                _disallow_interpolation(key, "use attribute expansion instead")
-                attributes[key] = Template(value).substitute(
-                    self.starttag_interpolations
-                )
-            elif (match := _TEMPLATE_PLACEHOLDER_PATTERN.match(key)) is not None:
-                # A valid template placeholder should always have a corresponding interpolation
-                attribute_expansion = self.starttag_interpolations[match.group(1)]
+        for k, v in attrs:
+            if v is not None:
+                _disallow_interpolation(k, "use attribute expansion instead")
+                attributes[k], self.values = join_with_values(v, self.values)
+            elif k == PLACEHOLDER:
+                attribute_expansion, *self.values = self.values
                 if not isinstance(attribute_expansion, dict):
                     raise TypeError("Expected a dictionary for attribute expension")
                 attributes.update(attribute_expansion)
             else:
-                _disallow_interpolation(key, "use attribute expansion instead")
-                attributes[key] = True
+                _disallow_interpolation(k, "use attribute expansion instead")
+                attributes[k] = True
+        assert not self.values, "Did not interpolate all values"
 
         this_node = HtmlNode(tag, attributes)
         last_node = self.stack[-1]
         last_node.children.append(this_node)
         self.stack.append(this_node)
 
-        self.open_node = this_node
-
-        self.starttag_interpolations.clear()
-
     def handle_data(self, data: str) -> None:
-        assert self.open_node
+        interleaved_children, self.values = interleave_with_values(data, self.values)
+        assert not self.values, "Did not interpolate all values"
 
-        interleaved_children = []
-        for dat, val in zip(
-            data.split(_DATA_DELIMITER), self.data_interpolations + [""]
-        ):
-            interleaved_children.append(dat)
-            if isinstance(val, (list, tuple, GeneratorType)):
-                interleaved_children.extend(val)
-            else:
-                interleaved_children.append(val)
-
-        self.open_node.children.extend(c for c in interleaved_children if c != "")
-        self.data_interpolations.clear()
-        self.open_node = None
+        children = self.stack[-1].children = []
+        for child in interleaved_children:
+            match child:
+                case list() | tuple() | GeneratorType():
+                    children.extend(child)
+                case "":
+                    pass
+                case _:
+                    children.append(child)
 
     def handle_endtag(self, tag: str) -> None:
-        self.open_node = None
         self.stack.pop()
 
 
-# We choose this symbol because, after replacing all $ with $$, there is no way for a
-# user to feed a string that would result in {$}. Thus we can reliably split an HTML
-# data string on {$}.
-_DATA_DELIMITER = "{$}"
+def join_with_values(string, values) -> tuple[str, list[Any]]:
+    interleaved_values, remaining_values = interleave_with_values(string, values)
+    return "".join(map(str, interleaved_values)), remaining_values
 
 
-# Use this to grab the name of a template placeholder (e.g. ${name})
-_TEMPLATE_PLACEHOLDER_PATTERN = re.compile(r"^\${(\w[\w\d)]*)}$")
+def interleave_with_values(string, values) -> tuple[list[str | Any], list[Any]]:
+    string_parts = string.split(PLACEHOLDER)
+    remaining_values = values[len(string_parts) - 1 :]
+
+    interleaved_values: list[str] = []
+    for s, v in zip(string_parts[:-1], values):
+        interleaved_values.append(s)
+        interleaved_values.append(v)
+    interleaved_values.append(string_parts[-1])
+
+    return interleaved_values, remaining_values
 
 
 def _format_value(value: Any, conv: str, spec: str) -> Any | str:
+    if not conv and not spec:
+        return value
 
+    match conv:
+        case "r":
+            value = repr(value)
+        case "s":
+            value = str(value)
+        case "a":
+            value = ascii(value)
+        case None:
+            pass
+        case _:
+            raise ValueError(f"Bad conversion: {conv!r}")
+
+    return format(value, spec)
 
 
 def _disallow_interpolation(string: str, reason: str) -> None:
-    try:
-        Template(string).substitute()
-    except KeyError:
+    if PLACEHOLDER in string:
         raise ValueError(f"Cannot interpolate {string} - {reason}")
 
 

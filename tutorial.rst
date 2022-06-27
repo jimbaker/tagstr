@@ -360,6 +360,7 @@ interpolate. Thankfully though, Python comes with a built in ``html.parser`` mod
 that we can build atop. Given this, the implementation of ``html`` will look a bit like
 this::
 
+    from dataclasses import dataclass, field
     from html.parser import HTMLParser
 
     def html(*args: str | Thunk) -> HtmlNode:
@@ -393,6 +394,10 @@ until its ``args`` have been exhausted. At which point it can return the resulti
 interpolated tree of ``HtmlNode`` objects. ``HtmlBuilder`` then, being a subclass of
 ``HTMLParser``, will implement the necessary ``handle_*`` methods to accomplish this.
 
+
+A simple HTML builder
+.....................
+
 The vast majority of the work in implementing the ``html`` tag lies in the
 ``HtmlBuilder``. Further, much of the difficulties in its implementations stem from
 the fact that it must interpolate values from thunks into the resulting HtmlNode tree.
@@ -423,7 +428,7 @@ To get to grips with how to proceed, its useful to consider how one might implem
                 return root
 
         def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-            this_node = HtmlNode(tag, {k, True if v is None else v for k, v in attrs.items()})
+            this_node = HtmlNode(tag, {k: (v or True) for k, v in attrs.items()})
             last_node = self.stack[-1]
             last_node.children.append(this_node)
             self.stack.append(this_node)
@@ -436,9 +441,9 @@ To get to grips with how to proceed, its useful to consider how one might implem
 
 .. note::
 
-    This implementation includes a minor editorial decision in the handling of boolean HTML
-    attributes. Where ``HTMLParser`` treats the value of such attributes as ``None``
-    ``SimpleHtmlBuilder`` converts them to ``True``.
+    This implementation includes a minor editorial decision in the handling of boolean
+    HTML attributes. Where ``HTMLParser`` treats the value of such attributes as
+    ``None`` ``SimpleHtmlBuilder`` converts them to ``True``.
 
 The key insight of ``SimpleHtmlBuilder`` is that, in order to create the tree of
 ``HtmlNode`` objects, you must keep track of the node which is currently being
@@ -448,19 +453,52 @@ call and then popping at each ``handle_endtag()`` call. In this way, when
 ``handle_data()`` is called, the builder knows which node to append a child to.
 
 The remaining detail of ``result()`` is to handle the case where one or more elements
-lie at the root of the document passed to the parser. In the case where there's more
-than one node which has been constructed within the ``root``, the solution is to return
-the root itself which is "untagged." That is, its tag is an empty string and it has no
-attributes. This is how it works in practice::
+lie at the root of the document passed to the parser. In the case where there's one node
+which has been added to the builder's ``root.children`` that single node is returned.
+However, if there's more than one node that has been added, the solution is to return
+the ``root`` node itself. This is how it works in practice::
 
-    builder = SimpleHtmlBuilder()
-    builder.feed("<h1/><h2/>")
-    assert builder.result() == HtmlNode(children=[HtmlNode("h1"), HtmlNode("h2")])
+    single_node = SimpleHtmlBuilder().feed("<div><h1/><h2/></div>").result()
+    assert single_root == HtmlNode("div", [HtmlNode("h1"), HtmlNode("h2")])
+
+    multi_node = SimpleHtmlBuilder().feed("<h1/><h2/>").result()
+    assert multi_node == HtmlNode("", [HtmlNode("h1"), HtmlNode("h2")])
 
 .. note::
 
-    Untagged nodes do not show up in the rendered HTML - only their children do.
+    "Untagged" nodes, like the ``root``, whose ``tag`` attribute is an empty string,
+    will ultimately be stripped from HTML strings produced by ``HtmlNode.render()``.
 
+
+An HTML builder with interpolation
+..................................
+
+Having learned how to turn HTML strings into a tree of ``HtmlNode`` objects, focus can
+shift towards adding interpolation and creating the final ``HtmlBuilder`` class. Doing
+so will first require that the ``HtmlBuilder.feed`` method is modified to accept both
+strings and Thunks. The approach taken here will be to replace each encountered Thunk
+with a placeholder string that can be fed to the parser. Then, by tracking Thunks in
+relation to their placeholders, the location of a given interpolated value in the HTML
+can be identified. For example, given the following tag string::
+
+    heading_size = 1
+    style = {"font-weight": "bold"}
+    greeting = "Hello"
+    name = "Sam"
+    html"<h{heading_size} style={style}>{greeting}, {name}!</h1>"
+
+Internally, substituting each expression with ``{$}`` would produce a string that could
+be fed to the parser as::
+
+    "<h{$} style={$}>{$}, {$}<h1>"
+
+With the expression values held in a list based on the order they were encountered:
+
+    [heading_size, style, greeting, name]
+
+Then, in ``handle_starttag`` and ``handle_data``, the expression value associated with
+each placeholder can be recovered by interleaving the parsed HTML components with the
+stored values.
 
 
 Recursive ``html`` construction
