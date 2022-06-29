@@ -1,6 +1,6 @@
 import shlex
 
-from taglib import Thunk, decode_raw
+from taglib import Thunk
 
 
 # Minimal marker class to distinguish two classes of strings:
@@ -15,23 +15,22 @@ class ShellCommand(str):
 
 def sh(*args: str | Thunk) -> ShellCommand:
     command = []
-    for arg in decode_raw(*args):
+    for arg in args:
         match arg:
             case str():
                 command.append(arg)
-            case getvalue, *_:
-                value = getvalue()
-                match value:
+            case getvalue, _, _, _:
+                match value := getvalue():
                     case ShellCommand():
                         command.append(value)
                     case _:
                         # It may be nonsensical to stringify arbitrary values
                         # but they will be appropriately shell quoted!
-                        command.append(shlex.quote(str(getvalue())))
+                        command.append(shlex.quote(str(value)))
     return ShellCommand(command)
 
 
-def useit():
+def demo():
     import subprocess
 
     for name in ['.', 'foo', 'foo; cat some/credential/data', 47, {'some': 'data'}]:
@@ -41,4 +40,4 @@ def useit():
 
 
 if __name__ == '__main__':
-    useit()
+    demo()
