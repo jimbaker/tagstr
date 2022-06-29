@@ -1,133 +1,114 @@
 import re
 import sqlite3
-from collections import namedtuple
-from collections.abc import Iterable
+from typing import Any, NamedTuple
+
+from taglib import Thunk
 
 
-from taglib import Thunk, decode_raw
+# NOTE: other dialects have different rules, for example Postgres
+# allows for Unicode in the unquoted identifier, per the docs.
+SQLITE3_VALID_UNQUOTED_IDENTIFIER_RE = re.compile(r'[a-z_][a-z0-9_]*')
 
 
-def combine(cols: Iterable) -> Iterable[tuple]:
-    """Combines cols of single values into a column of tuples"""
-    col_iters = [iter(col) for col in cols]
-    while True:
-        try:
-            yield tuple([next(col_iter) for col_iter in col_iters])
-        except StopIteration:
-            break
-
-
-Qmarked = namedtuple('Qmarked', ['statements', 'values'])
-VALUES_RE = re.compile(r'\s+values\s+\($', re.IGNORECASE)
-
-class Qmarkify:
-    """Implements `sql` tag string for SQLite, safe or unsafe"""
-    # TODO consider changing to named placeholders instead of qmarks, especially
-    # given that we have the raw expression (taking into account that the raw
-    # expression might be an arbitrary expression, so need to mangle
-    # accordingly).
-    def __init__(self, unsafe=False):
-        self.unsafe = unsafe
-
-    @staticmethod
-    def _quote_identifier(name: str) -> str:
-        # NOTE: This quoting rule is used by the PostgreSQL and SQLite dialects,
-        # and possibly others. For SQLite at least, it is also guaranteed that
-        # any quoting does not change case insensitivity. This means such
-        # idenitifer quoting can always be safely done in the interpolation.
+def _quote_identifier(name: str) -> str:
+    if not name:
+        raise ValueError("Identifiers cannot be an empty string")
+    elif SQLITE3_VALID_UNQUOTED_IDENTIFIER_RE.match(name):
+        # Do not quote if possible
+        return name
+    else:
         s = name.replace('"', '""')  # double any quoting to escape it
         return f'"{s}"'
 
-    def __call__(self, *args: str | Thunk, unsafe=False) -> Qmarked[str, tuple]:
-        # NOTE this is a very limited parser. But SQL! It just might be
-        # sufficient for the limited aspect we are supporting.
 
-        statement = []
-        values = []
-        in_values = False
-        use_executemany = {}
-
-        for arg in decode_raw(*args):
-            match arg:
-                case str():
-                    if in_values and arg.strip() != ',':
-                        in_values = False
-                    statement.append(arg)
-                    # We only care about '...values (' immediately before we
-                    # process any interpolation(s), otherwise it can be safely
-                    # ignored.
-                    if VALUES_RE.search(arg):
-                        in_values = True
-                case getvalue, raw, _, _:
-                    value = getvalue()
-                    if isinstance(value, Qmarked):
-                        sub_statement, sub_values = value
-                        if sub_values:
-                            raise ValueError(f'Cannot substitute with placeholders {raw!r}: {sub_statement}')
-                        statement.append(sub_statement)
-                    elif in_values:
-                        statement.append('?')
-                        # This executemany selection logic seems brittle and is
-                        # potentially flawed.
-                        match value:
-                            case str():
-                                use_executemany[raw] = False
-                            case Iterable():
-                                use_executemany[raw] = True
-                            case _:
-                                use_executemany[raw] = False
-                        values.append(value)
-                    # FIXME Need to match against `name = {expr}` and put a placeholder
-                    # in at this position
-                    elif self.unsafe:
-                        # This is in not a placeholder position, but we allow
-                        # for it to be inserted here.
-                        statement.append(self._quote_identifier(value))
-                    else:
-                        raise ValueError(f'Cannot interpolate {raw!r} in safe mode')
-
-        stmt = ''.join(statement)
-        print(f'{stmt=}, {use_executemany=}, {values=}')
-
-        if use_executemany and all(use_executemany.values()):
-            return stmt, combine(values)
-        elif any(use_executemany.values()):
-            raise ValueError('Columns must all either be a collection of values or a single value')
-        else:
-            return Qmarked(stmt, values)
+class SQL(NamedTuple):
+    sql: str
+    parameters: dict[str, Any]
 
 
-sql = Qmarkify()
-sql_unsafe = Qmarkify(unsafe=True)
+class Identifier(str):
+    def __new__(cls, name):
+        return super().__new__(cls, _quote_identifier(name))
 
 
-# Compare against the example in https://docs.python.org/3/library/sqlite3.html
-# 
-# FIXME need to add more demo SQL here, with respect to nested subqueries, etc
-# presumably in the SQLite docs.
+def sql(*args: str | Thunk) -> SQL:
+    parts = []
+    parameters = {}
+
+    for arg in args:
+        match arg:
+            case str():
+                parts.append(arg)
+            case getvalue, raw, _, _:
+                match value := getvalue():
+                    case SQL():
+                        parts.append(value.sql)
+                        parameters |= value.parameters
+                    case Identifier():
+                        parts.append(value)
+                    case _:
+                        # FIXME this only works if the expression is a valid
+                        # placeholder name as well - we will need some sort
+                        # of "slug" scheme that preserves uniqueness,
+                        # or just simple numbering
+                        placeholder = f':{raw}'
+                        parts.append(placeholder)
+                        parameters[raw] = value
+
+    
+    return SQL(''.join(parts), parameters)
+
+
+# Based on examples in:
+# https://docs.python.org/3/library/sqlite3.html
+# https://dev.mysql.com/doc/refman/8.0/en/with.html#common-table-expressions-recursive-fibonacci-series
+
 def demo():
     table_name = 'lang'
     name = 'C'
     date = 1972
 
-    names = ['Fortran', 'Python', 'Go']
-    dates = [1957, 1991, 2009]
-
     with sqlite3.connect(':memory:') as conn:
         cur = conn.cursor()
-        cur.execute(*sql_unsafe'create table {table_name} (name, first_appeared)')
-        cur.execute(*sql_unsafe'insert into {table_name} values ({name}, {date})')
-        cur.executemany(*sql'insert into lang values ({names}, {dates})')
-
-        # FIXME time to write proper unit tests!
-        assert set(cur.execute('select * from lang')) == \
-            {('C', 1972),  ('Fortran', 1957), ('Python', 1991), ('Go', 2009)}
+        cur.execute(*sql'create table {Identifier(table_name)} (name, first_appeared)')
+        cur.execute(*sql'insert into lang values ({name}, {date})')
+        assert set(cur.execute('select * from lang')) == {('C', 1972)}
 
         try:
+            # Verify that not using an identifier will result in an
+            # incorrect usage of placeholders
             cur.execute(*sql'drop table {table_name}')
             assert 'Did not raise error'
-        except ValueError:
+        except sqlite3.OperationalError:
             pass
+
+        num = 50
+        num_results = 10
+        
+        # NOTE: separating out these queries like this probably doesn't
+        # make it easier to read, but at least we can show the subquery
+        # aspects work as expected, including placeholder usage.
+        base_case = sql'select 1, 0, 1'
+        inductive_case = sql"""
+            select n + 1, next_fib_n, fib_n + next_fib_n
+                from fibonacci where n < {num}
+            """
+
+        results = cur.execute(*sql"""
+            with recursive fibonacci (n, fib_n, next_fib_n) AS
+                (
+                    {base_case}
+                    union all
+                    {inductive_case}
+                )
+                select n, fib_n from fibonacci
+                order by n
+                limit {num_results}
+            """)
+        assert set(results) == \
+             {(1, 0), (2, 1), (3, 1), (4, 2), (5, 3),
+              (6, 5), (7, 8), (8, 13), (9, 21), (10, 34)}
+
 
 
 if __name__ == '__main__':
