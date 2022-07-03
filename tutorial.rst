@@ -35,7 +35,7 @@ The above code is the equivalent of writing this code::
     s = ''.join(['Hello, ', format(name, ''), ", it's great to meet you!"])
 
 Here we see that the f-string syntax has a compact syntax for combining into one
-string a sequence of strings -- ``'Hello, '`` and ``", it's great to meet
+string a sequence of strings -- ``"Hello, "`` and ``", it's great to meet
 you!"`` -- with interpolations of values, which are formatted into strings.
 Often this overall string construction is exactly what you want.
 
@@ -49,7 +49,7 @@ and subprocesses. This means you have to use ``use_shell=True``::
     print(run(f'ls -ls {path} | (echo "First 5 results from ls:"; head -5)', use_shell=True))
 
 However, this code as written is broken on any untrusted input. In other words,
-we have a shell injection attack, or from XKCD, a Bobby Tables problem::
+we have a shell injection attack, or from xkcd, a Bobby Tables problem::
 
     path = 'foo; cat /etc/passwd'
     print(run(f'ls -ls {path} | (echo "First 5 results from ls:"; head -5)', use_shell=True))
@@ -284,7 +284,233 @@ further extend this example by looking at other possible caching.
 `sql` tag
 ---------
 
-TODO: demonstrate construction of named placeholders, along with using ``raw``
+The beginning of the tutorial introduced a shell injection attack, as
+popularized by xkcd with "Bobby Tables." Of course, the `original injection in
+the xkcd comic <https://xkcd.com/327/>`_ was for SQL::
+
+    name = "Robert') DROP TABLE students; --"
+
+which then might be naively used with SQLite3 with something like the
+following::
+
+    import sqlite3
+
+    with sqlite3.connect(':memory:') as conn:
+        cur = conn.cursor()
+        # BOOM - don't do this!
+        print(list(cur.execute(
+            f'select * from students where first_name = "{name}"')))
+
+This is a perennial question of Stack Overflow. Someone will ask, can I do
+something like the above? "No" is the immediate response. Use parameterized
+queries. Use a library like SQLAlchemy. These are valid answers.
+
+However, occasionally there is a good reason to want to do something with
+f-strings or similar templating. You might want to do DDL ("data definition
+language") to work with your schemas in a dynamic fashion, such as creating a
+table based on a variable. Or you are trying to build a very complex query
+against a big data system. While it is possible to use SQLAlchemy or similar
+tools to do such work, sometimes it may just be easier to use the underlying
+SQL.
+
+Let's implement a ``sql`` tag to do just that. Start with the following
+observation: Any SQL text directly in string tagged with ``sql`` is safe,
+because it cannot be from untrusted user input::
+
+    from taglib import Thunk
+
+    def sql(*args: str | Thunk) -> SQL:
+        """Implements sql tag"""
+        parts = []
+        for arg in args:
+            match arg:
+                case str():
+                    parts.append(arg)
+                case getvalue, raw, _, _:
+                    ...
+
+As you have already done earlier in the tutorial, consider what substitutions to
+support for the thunks.
+
+**Placeholders**, such as with named parameters in SQLite3. This is safe,
+because the SQL API -- such as sqlite3 library -- pass any arguments as data to
+the executed SQL statement. In particular, use the ``raw`` expression
+in the tag interpolation to get a nicely named parameter::
+
+    from __future__ import annotations
+
+    import re
+    import sqlite3
+    from collections import defaultdict
+    from collections.abc import Sequence
+    from dataclasses import dataclass, field
+    from typing import Any
+
+    from taglib import Thunk
+
+    @dataclass
+    class Param:
+        raw: str
+        value: Any
+
+    def sql(*args: str | Thunk) -> SQL:
+        """Implements sql tag"""
+        parts = []
+        for arg in args:
+            match arg:
+                case str():
+                    parts.append(arg)
+                case getvalue, raw, _, _:
+                    parts.append(Param(raw, getvalue()))
+        return SQL(parts)
+
+Let's defined a useful ``SQL`` statement class::
+
+    @dataclass
+    class SQL(Sequence):
+        """Builds a SQL statements and any bindings from a list of its parts"""
+        parts: list[str | Param]
+        sql: str = field(init=False)
+        bindings: dict[str, Any] = field(init=False)
+
+        def __post_init__(self):
+            self.sql, self.bindings = analyze_sql(self.parts)
+
+        def __getitem__(self, index):
+            match index:
+                case 0: return self.sql
+                case 1: return self.bindings
+                case _: raise IndexError
+
+        def __len__(self):
+            return 2
+
+Note that the reason you are implementing the ``Sequence`` abstract base class
+is so you can readily call it with cursor ``execute`` like so::
+
+    name = 'C'
+    date = 1972
+
+    with sqlite3.connect(':memory:') as conn:
+        cur = conn.cursor()
+        cur.execute('create table lang (name, first_appeared)')
+        cur.execute(*sql'insert into lang values ({name}, {date})')
+
+The helper method ``analyze_sql`` is fairly simple to start::
+
+    def analyze_sql(parts: list[str | Part]) -> tuple[str, dict[str, Any]]:
+        text = []
+        bindings = {}
+        for part in parts:
+            match part:
+                case str():
+                    text.append(part)
+                case Param(raw, value):
+                    bindings[name] = value
+                    text.append(f':{name}')
+        return ''.join(text), bindings
+
+Now you want to add full support for two other substitutions, identifiers and
+SQL fragments (such as subqueries).
+
+**Identifiers** are things like table or column names. This requires direct
+substitution in the SQL statement, but it can be done safely if it is
+appropriately quoted; and your SQL statement properly uses it (no bugs!). So
+this allows your ``sql`` tag users to write something like the following::
+
+    table_name = 'lang'
+    name = 'C'
+    date = 1972
+
+    with sqlite3.connect(':memory:') as conn:
+        cur = conn.cursor()
+        cur.execute(*sql'create table {Identifier(table_name)} (name, first_appeared)')
+
+Of course, you probably don't want any arbitrary user on the Internet to create
+tables in your database, but at least it's not vulnerable to a SQL injection
+attack. More importantly, by marking it with ``Identifier`` you know exactly
+where in your logic this usage happens.
+
+Implement this ``Identifier`` support with a marker class::
+
+    SQLITE3_VALID_UNQUOTED_IDENTIFIER_RE = re.compile(r'[a-z_][a-z0-9_]*')
+
+    def _quote_identifier(name: str) -> str:
+        if not name:
+            raise ValueError("Identifiers cannot be an empty string")
+        elif SQLITE3_VALID_UNQUOTED_IDENTIFIER_RE.fullmatch(name):
+            # Do not quote if possible
+            return name
+        else:
+            s = name.replace('"', '""')  # double any quoting to escape it
+            return f'"{s}"'
+
+    class Identifier(str):
+        def __new__(cls, name):
+            return super().__new__(cls, _quote_identifier(name))
+
+The other substitution you may want to allow is **recursive substitution**,
+which is where you build up a statement out of other SQL fragments. As you saw
+earlier with other recursive substitutions, this is safe so long as it it made
+of safe usage of literal SQL, placeholders, and identifiers; and it is also
+correct if the named params don't collide. However, you already have what you
+need for such substitutions with the ``SQL`` statement class you defined
+earlier.
+
+Putting this together::
+
+    def sql(*args: str | Thunk) -> SQL:
+        """Implements sql tag"""
+        parts = []
+        for arg in args:
+            match arg:
+                case str():
+                    parts.append(arg)
+                case getvalue, raw, _, _:
+                    match value := getvalue():
+                        case SQL() | Identifier():
+                            parts.append(value)
+                        case _:
+                            parts.append(Param(raw, value))
+        return SQL(parts)
+
+You need to change the dataclass fields definition, so that ``parts`` can
+include other SQL fragments::
+
+    @dataclass
+    class SQL(Sequence):
+        parts: list[str | Param | SQL]  # added SQL to this line
+        sql: str = field(init=False)
+        bindings: dict[str, Any] = field(init=False)
+
+And lastly let's support recursive construction, plus properly handle named
+parameters so they don't collide (via a simple renaming)::
+
+    def analyze_sql(parts, bindings=None, param_counts=None) -> tuple[str, dict[str, Any]]:
+        if bindings is None:
+            bindings = {}
+        if param_counts is None:
+            param_counts = defaultdict(int)
+
+        text = []
+        for part in parts:
+            match part:
+                case str():
+                    text.append(part)
+                case Identifier(value):
+                    text.append(value)
+                case Param(raw, value):
+                    if not SQLITE3_VALID_UNQUOTED_IDENTIFIER_RE.fullmatch(raw):
+                        # NOTE could slugify this expr, eg 'num + b' -> 'num_plus_b'
+                        raw = 'expr'
+                    param_counts[(raw, value)] += 1
+                    count = param_counts[(raw, value)]
+                    name = raw if count == 1 else f'{raw}_{count}'
+                    bindings[name] = value
+                    text.append(f':{name}')
+                case SQL(subparts):
+                    text.append(analyze_sql(subparts, bindings, param_counts)[0])
+        return ''.join(text), bindings
 
 `html` tag, revisited
 ---------------------
