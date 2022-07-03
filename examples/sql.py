@@ -60,7 +60,7 @@ class SQL(Sequence):
         # See https://docs.sqlalchemy.org/en/14/core/sqlelement.html
         # this allows interoperation with SQLAlchemy
         from sqlalchemy import text
-        return text(sql.sql).bindparams(**self.bindings)
+        return text(self.sql).bindparams(**self.bindings)
 
 
 def analyze_sql(parts, bindings=None, param_counts=None) -> tuple[str, dict[str, Any]]:
@@ -158,5 +158,47 @@ def demo():
               (6, 5), (7, 8), (8, 13), (9, 21), (10, 34)}
 
 
+
+def demo_sqlalchemy():
+    try:
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import Session
+    except ImportError:
+        print("""
+Install the following packages to see this demo:
+- pip install greenlet>=2.0.0a2  # minimum version that works with Python 3.12 dev
+- pip install sqlalchemy
+""")
+    engine = create_engine("sqlite://", echo=True, future=True)
+    with Session(engine) as session:
+        num = 50
+        num_results = 9  # actually using num_results + 1, or 10
+
+        base_case = sql'select 1, 0, 1'
+        inductive_case = sql"""
+            select n + 1, next_fib_n, fib_n + next_fib_n
+                from fibonacci where n < {num}
+            """
+
+        statement = sql"""
+            with recursive fibonacci (n, fib_n, next_fib_n) AS
+                (
+                    {base_case}
+                    union all
+                    {inductive_case}
+                )
+                select n, fib_n from fibonacci
+                order by n
+                limit {num_results + 1}
+            """
+
+        sa_stmt = statement.to_sqlalchemy()
+        results = session.execute(sa_stmt)
+        assert set(results) == \
+             {(1, 0), (2, 1), (3, 1), (4, 2), (5, 3),
+              (6, 5), (7, 8), (8, 13), (9, 21), (10, 34)}
+
+
 if __name__ == '__main__':
     demo()
+    demo_sqlalchemy()
