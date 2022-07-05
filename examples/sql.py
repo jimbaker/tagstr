@@ -169,6 +169,8 @@ Install the following packages to see this demo:
 - pip install greenlet>=2.0.0a2  # minimum version that works with Python 3.12 dev
 - pip install sqlalchemy
 """)
+        return
+
     engine = create_engine("sqlite://", echo=True, future=True)
     with Session(engine) as session:
         num = 50
