@@ -29,9 +29,9 @@ The above code is the equivalent of writing this code::
 
     name = 'Bobby'
     s = 'Hello, ' + format(name, '') + ", it's great to meet you!"
-    
+
     # or equivalently
-    
+
     s = ''.join(['Hello, ', format(name, ''), ", it's great to meet you!"])
 
 Here we see that the f-string syntax has a compact syntax for combining into one
@@ -170,15 +170,493 @@ be used by some API, in this case ``subprocess.run``.
     be a good idea to memoize, or perform some other processing, to support this
     evaluation. More about this in a later section on compiling the ``html`` tag.
 
-`html` tag
-----------
 
-TODO: initial ``html.parse`` example
+Applications in templating
+--------------------------
 
-Recursive `html` construction
------------------------------
+Tag strings also find applications where complex string interpolation would otherwise
+require a templating engine like Jinja. Such engines typically come along with a Domain
+Specific Language (DSL) for declaring templates that, given some contextual data, can be
+compiled into larger bodies of text. An especially common use case for such engines is
+the construction of HTML documents. For example, if you wanted to create a simple todo
+list using Jinja it might look something like this::
 
-TODO: extend with a marker class
+    from jinja2 import Template
+
+    t = Template("""
+    <h1>{{ title }}</h1>
+    <ol>{% for item in list_items %}
+        <li>{{ item }}</li>{% endfor %}
+    </ol>
+    """)
+
+    doc = t.render(title="My Todo List", list_items=["Eat", "Code", "Sleep"])
+
+    print(doc)
+
+Which will render::
+
+    <h1>My Todo List</h1>
+    <ol>
+        <li>Eat</li>
+        <li>Code</li>
+        <li>Sleep</li>
+    </ol>
+
+This is simple enough, but Jinja templates can grow rapidly in complexity. For example,
+if we want to dynamically set attributes on the ``<li>`` elements the Jinja template
+it's far less straightforward::
+
+    from jinja2 import Template
+
+    t = Template(
+        """
+    <h1>{{ title }}</h1>
+    <ol>{% for item in list_items %}
+        <li {% for key, value in item["attributes"].items() %}{{ key }}={{ value }} {% endfor %}>
+            {{ item["value"] }}
+        </li>{% endfor %}
+    </ol>
+    """
+    )
+
+    doc = t.render(
+        title="My Todo List",
+        list_items=[
+            {
+                "attributes": {"value": "'3'"},
+                "value": "Eat",
+            },
+            {
+                "attributes": {"style": "'font-weight: bold'"},
+                "value": "Eat",
+            },
+            {
+                "attributes": {"type": "'a'", "style": "'font-weight: bold'"},
+                "value": "Eat",
+            },
+        ],
+    )
+
+    print(doc)
+
+The result of which is::
+
+    <h1>My Todo List</h1>
+    <ol>
+        <li value='3' >
+            Eat
+        </li>
+        <li style='font-weight: bold' >
+            Eat
+        </li>
+        <li type='a' style='font-weight: bold' >
+            Eat
+        </li>
+    </ol>
+
+One of the problems here is that Jinja is a generic templating tool, so the specific
+needs that come with rendering HTML, like expanding dynamic attributes, aren't supported
+out of the box. More broadly, Jinja templates make it difficult to coordinate business
+and UI logic since markup in the template is kept separate from your logic in Python.
+
+Thankfully though, string tags give us an opportunity to develop a syntax specifically
+designed to make declaring elaborate HTML documents easier. In the tutorial to follow,
+you'll learn how to create an ``html`` tag which can do just this. Specifically, we'll
+be taking inspiration from the JSX in order to bring your markup and logic closer
+together. Here's a couple examples of what it will be able to do::
+
+    # Attribute expansion
+    attributes = {"color": "blue", "style": {"font-weight": "bold"}}
+    assert (
+        html"<h1 {attributes}>Hello, world!</h1>".render()
+        == '<h1 color="blue" style="font-weight:bold">Hello, world!<h1>'
+    )
+
+    # Recursive construction
+    assert (
+        html"<body>{html"<h{i}/>" for i in range(1, 4)}</body>".render()
+        == "<body><h1></h1><h2></h2><h3></h3></body>"
+    )
+
+While this would certainly be difficult to achieve with a standard templating solution,
+what's perhaps more interesting is that this ``html`` tag will output a structured
+representation of the HTML that can be freely manipulated - a Document Object Model
+(DOM) of sorts for HTML::
+
+    node: HtmlNode = html"<h1/>"
+    node.attributes["color"] = "blue"
+    node.children.append("Hello, world!")
+    assert node.render() == '<h1 color="blue">Hello, world!</h1>'
+
+Where ``HtmlNode`` is defined as:
+
+
+    HtmlAttributes = dict[str, Any]
+    HtmlChildren = list[str, "HtmlNode"]
+
+    class HtmlNode:
+        """A single HTML document object model node"""
+
+        type: str
+        attributes: HtmlAttributes
+        children: HtmlChildren
+
+        def render(self) -> str:
+            ...
+
+This capability in particular is one which would be impossible, or at the very least
+convoluted, to achieve with a templating engine like Jinja. By returning a DOM instead
+of a string, this ``html`` tag allows for a much broader set of uses.
+
+NOTE: we should probably come up with a simpler example than the one below
+
+For example, while we can't strictly embed callbacks into any HTML we render, we can
+correspond them with an ID which a client could send as part of an event. With this in
+mind, we could trace the DOM for functions that have been assigned to
+``HtmlNode.attributes`` in order to replace them with an ID that could used to relocate
+and trigger them later::
+
+    EventHandlers = dict[str, Callable[..., Any]]
+
+    def load_event_handlers(node: HtmlNode) -> DomNode, EventHandlers:
+        handlers = handlers or {}
+
+        new_attributes: HtmlAttributes = {}
+        for k, v in node.attributes.items():
+            if isinstance(v, callable):
+                handler_id = id(v)
+                handlers[handler_id] = v
+                new_attributes[f"data-handle-{k}"] = handler_id
+            else:
+                new_attributes[k] = v
+
+        new_children: HtmlChildren = []
+        for child in node.children:
+            if isinstance(child, HtmlNode):
+                child, child_handlers = load_event_handlers(child)
+                handlers.update(child_handlers)
+            new_children.append(child)
+
+        return HtmlNode(type=node.type, attributes=new_attributes, children=new_children)
+
+    handle_onclick = lambda event: ...
+    handle_onclick_id = id(handle_onclick)
+
+    button = html"<button onclick={handle_onclick} />"
+    button, handlers = load_event_handlers(button)
+
+    assert button.render() == f'<button data-handle-onclick="{handle_onclick_id}" />'
+    assert handlers == {handle_onclick_id: handle_onclick}
+
+
+Writing an ``html`` tag
+.......................
+
+In contrast to the ``sh`` tag, which did not need to do any parsing, the ``html`` tag
+must parse the HTML it receives since, in order to perform attribute expansions and
+recursive construction it needs to know the semantic meaning of values it will
+interpolate. Thankfully though, Python comes with a built in ``html.parser`` module that
+that we can build atop. Given this, the implementation of ``html`` will look a bit like
+this::
+
+    from dataclasses import dataclass, field
+    from html.parser import HTMLParser
+
+    def html(*args: str | Thunk) -> HtmlNode:
+        builder = HtmlBuilder()
+        for data in args:
+            builder.feed(data)
+        return builder.result()
+
+    @dataclass
+    class HtmlNode:
+        """A single HTML document object model node"""
+
+        tag: str = field(default_factory=str)
+        attributes: HtmlAttributes = field(default_factory=dict)
+        children: HtmlChildren = field(default_factory=list)
+
+        def render(self) -> str: ...
+
+    class HtmlBuilder(HTMLParser):
+        """Construct HtmlNodes from strings and thunks"""
+
+        def feed(self, data: str | Thunk) -> None: ...
+        def result(self) -> HtmlNode: ...
+
+        def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None: ...
+        def handle_data(self, data: str) -> None: ...
+        def handle_endtag(self, tag: str) -> None: ...
+
+Where the ``html`` tag will feed each of its strings and thunks to an ``HtmlBuilder``
+until its ``args`` have been exhausted. At which point it can return the resulting
+interpolated tree of ``HtmlNode`` objects. ``HtmlBuilder`` then, being a subclass of
+``HTMLParser``, will implement the necessary ``handle_*`` methods to accomplish this.
+
+
+A simple HTML builder
+.....................
+
+The vast majority of the work in implementing the ``html`` tag lies in the
+``HtmlBuilder``. Further, much of the difficulties in its implementations stem from
+the fact that it must interpolate values from thunks into the resulting HtmlNode tree.
+To get to grips with how to proceed, its useful to consider how one might implement a
+``SimpleHtmlBuilder`` which does not interpolate values::
+
+    # TODO: add comments to the code
+
+    class SimpleHtmlBuilder(HTMLParser):
+        """Construct HtmlNodes from strings and thunks"""
+
+        def __init__(self):
+            super().__init__()
+            self.root = HtmlNode()
+            self.stack = [self.root]
+
+        def result(self) -> HtmlNode:
+            root = self.root
+            self.close()
+            if (len_root_children := len(root.children)) == 0:
+                raise ValueError("Nothing to return")
+            elif len_root_children == 1:
+                return root.children[0]
+            else:
+                return root
+
+        def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+            this_node = HtmlNode(tag, {k: (v or True) for k, v in attrs.items()})
+            last_node = self.stack[-1]
+            last_node.children.append(this_node)
+            self.stack.append(this_node)
+
+        def handle_data(self, data: str) -> None:
+            self.stack[-1].append(data)
+
+        def handle_endtag(self, tag: str) -> None:
+            self.stack.pop()
+
+.. note::
+
+    This implementation includes a minor editorial decision in the handling of boolean
+    HTML attributes. Where ``HTMLParser`` treats the value of such attributes as
+    ``None`` ``SimpleHtmlBuilder`` converts them to ``True``.
+
+The key insight of ``SimpleHtmlBuilder`` is that, in order to create the tree of
+``HtmlNode`` objects, you must keep track of the node which is currently being
+constructed using stack data structure. Knowing this, the main work is in keeping the
+stack up to date. This involves appending to the stack at each ``handle_starttag()``
+call and then popping at each ``handle_endtag()`` call. In this way, when
+``handle_data()`` is called, the builder knows which node to append a child to.
+
+The remaining detail of ``result()`` is to handle the case where one or more elements
+lie at the root of the document passed to the parser. In the case where there's one node
+which has been added to the builder's ``root.children`` that single node is returned.
+However, if there's more than one node that has been added, the solution is to return
+the ``root`` node itself. This is how it works in practice::
+
+    single_node = SimpleHtmlBuilder().feed("<div><h1/><h2/></div>").result()
+    assert single_root == HtmlNode("div", [HtmlNode("h1"), HtmlNode("h2")])
+
+    multi_node = SimpleHtmlBuilder().feed("<h1/><h2/>").result()
+    assert multi_node == HtmlNode("", [HtmlNode("h1"), HtmlNode("h2")])
+
+.. note::
+
+    "Untagged" nodes, like the ``root``, whose ``tag`` attribute is an empty string,
+    will ultimately be stripped from HTML strings produced by ``HtmlNode.render()``.
+
+
+An HTML builder with interpolation
+..................................
+
+Now that you've learned how to turn HTML strings into a tree of ``HtmlNode`` objects
+using a ``SimpleHtmlBuilder``, you can shift your focus towards adding interpolation and
+creating the final ``HtmlBuilder`` class. To create this ``HtmlBuilder`` class it will
+be necessary to implement a ``feed()`` method that can accept both strings and Thunks.
+The approach laid out below will feed a placeholder string to the parser each time a
+Thunk is encountered while appending the Thunk's corresponding the value to a list. For
+example, given the following tag string::
+
+    html"<{tag} style={style} color=blue>{greeting}, {name}!</{tag}>"
+
+The ``feed()`` method will substituted each expression with a placeholder ``{$}`` such
+that the parser receives the string::
+
+    "<{$} style={$} color=blue>{$}, {$}!</{$}>"
+
+The implementation of this logic can be written as::
+
+    from taglib import format_value
+
+    PLACEHOLDER = "{$}"
+
+    class HtmlBuilder(HTMLParser):
+
+        def __init__(self):
+            super().__init__()
+            self.root = HtmlNode()
+            self.stack = [self.root]
+            self.values: list[Any] = []
+
+        def feed(self, data: string | Thunk) -> None:
+            match data:
+                case str():
+                    super().feed(data)
+                case getvalue, _, conv, spec:
+                    self.values.append(
+                        format_value(getvalue(), conv, spec)
+                        if conv or spec else
+                        getvalue()
+                    )
+                    super().feed(PLACEHOLDER)
+
+However, having done this, you'll now need some way to reconnect each instance of the
+placeholder with its corresponding expression value when implementing
+``handle_starttag`` and ``handle_data``. The easiest way to do this is to split the
+substituted string on the placeholder and zip the split string back together with the
+expression values::
+
+    def interleave_values(string: str, values: list[Any]) -> tuple[list[str | Any], list[Any]]:
+        string_parts = string.replace("$", "$$").split(PLACEHOLDER)
+
+        interleaved: list[str] = []
+        for s, v in zip(string_parts[:-1], values):
+            interleaved.append(s.replace("$$", "$"))
+            interleaved.append(v)
+        interleaved.append(string_parts[-1])
+
+        return (
+            interleaved,
+            # In case we don't use all the values, return those that remain.
+            values[len(string_parts) - 1 :]
+        )
+
+.. note::
+
+    The ``PLACEHOLDER`` has been selected to be ``{$}`` because, after replacing all
+    ``$`` with ``$$``, there is no way for a user to feed a string that would result in
+    ``{$}``. Thus we can reliably identify any remaining ``{$}`` to be placeholders.
+
+Absent the parser, you could put ``interleave_values`` to use like this::
+
+    tag = "h1"
+    style = {"font-weight": "bold"}
+    greeting = "Hello"
+    name = "Alice"
+
+    substituted_string = "<{$} style={$} color=blue>{$}, {$}!</{$}>"
+    values = [tag, style, greeting, name, tag]
+
+    result, _ = interleave_values(substituted_string, value)
+    assert result == ["<", tag, " style=", style, "color=blue>", greeting, ", ", name, "!</", tag, ">"]
+
+In this case, all expression values were used while interleaving. In the context of
+``handle_starttag(tag, attrs)`` though, it won't necessarily be clear how many values
+should be consumed ahead of time. For example, given ``substituted_string``, the
+``style`` attribute contains a substituted value but ``color`` does not. Thus as you
+process each attribute you can't know ahead of time whether it contains an expression.
+As a result, you'll want to update your list of remaining values each time
+``interleave_values`` is called::
+
+    interleaved, values = interleave_values(string, values)
+
+With ``interleave_values`` implemented, you'll be able to write the remaining parser
+methods starting with ``handle_starttag``. The first challenge to tackle in
+``handle_starttag`` is dealing with any expressions that may have appeared in an
+element's tag name. For example, one could imaging a partially interpolated tag name
+like ``h{size}`` where ``size`` might be some integer. In this case you can just join
+the interleaved values together into one string::
+
+
+        def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+            interleaved_tag, self.values = interleave_values(tag, self.values)
+            node_tag = "".join(str(part) for part in interleaved_tag)
+            ...
+
+To tackle the ``attrs`, you'll want to consider the different ways they might be
+declared. In this tutorial you'll focus on dealing with the following cases where
+interpolations might happen in HTML attributes:
+
+1. The attribute's name is interpolated: ``<tag {attr}=value />``
+2. The attribute's value is interpolated: ``<tag attr={value} />``
+3. Attributes are declared with a dictionary (attribute expansion): ``<tag { {attr: value} } />``
+4. Some combination of 1-3
+
+In all other scenarios, attribute interpolation will be disallowed since such cases
+could be achieved using attribute expansion instead. For example, if you wanted to
+declare an attribute value which was partially interpolated (e.g. ``color=dark{color}``)
+you could do::
+
+    attrs = {"color": f"dark{color}"}
+    element = html"<h1 {attrs} />"
+
+Put into practice then::
+
+        def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+            tag_interleaved, self.values = interleave_values(tag, self.values)
+            node_tag = "".join(str(part) for part in tag_interleaved)
+
+            node_attrs: dict[Any, Any] = {}
+            for k, v in attrs:
+                if k == PLACEHOLDER:
+                    k = self.values.pop(0)
+                elif PLACEHOLDER in k:
+                    raise ValueError(f"Found partial interpolation in {k!r} - use attribute expansion instead")
+
+                if v is None:
+                    if isinstance(k, dict):
+                        node_attrs.update(k)  # attribute expansion - html"<tag { {'attr': value} } />"
+                    else:
+                        node_attrs[k] = True  # boolean attribute - html"<tag attr />"
+                elif v == PLACEHOLDER:
+                    v = self.values.pop(0)
+                elif PLACEHOLDER in v:
+                    raise ValueError(f"Found partial interpolation in {v!r} - use attribute expansion instead")
+                else:
+                    node_attrs[k] = v
+
+            ...
+
+The last thing to deal with in ``handle_starttag`` is to construct the actual
+``HtmlNode`` and add it to the ``stack``. This can be copied from the
+``SimpleHtmlBuilder`` with little modification::
+
+        def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+            tag_interleaved, self.values = interleave_values(tag, self.values)
+            node_tag = "".join(str(part) for part in tag_interleaved)
+
+            node_attrs: dict[Any, Any] = {}
+            for k, v in attrs:
+                if k == PLACEHOLDER:
+                    k = self.values.pop(0)
+                elif PLACEHOLDER in k:
+                    raise ValueError(f"Found partial interpolation in {k!r} - use attribute expansion instead")
+
+                if v is None:
+                    if isinstance(k, dict):
+                        node_attrs.update(k)  # attribute expansion - html"<tag { {'attr': value} } />"
+                    else:
+                        node_attrs[k] = True  # boolean attribute - html"<tag attr />"
+                elif v == PLACEHOLDER:
+                    v = self.values.pop(0)
+                elif PLACEHOLDER in v:
+                    raise ValueError(f"Found partial interpolation in {v!r} - use attribute expansion instead")
+                else:
+                    node_attrs[k] = v
+
+            this_node = HtmlNode(node_tag, node_attrs)
+            last_node = self.stack[-1]
+            last_node.children.append(this_node)
+            self.stack.append(this_node)
+
+
+
+
+`html` components
+.................
+
+TODO: show how you can expand html tag to allow for HTML components
 
 `fl` tag - lazy interpolation of f-strings
 ------------------------------------------
