@@ -470,13 +470,13 @@ the ``root`` node itself. This is how it works in practice::
 An HTML builder with interpolation
 ..................................
 
-Having learned how to turn HTML strings into a tree of ``HtmlNode`` objects, focus can
-shift towards adding interpolation and creating the final ``HtmlBuilder`` class. To
-create this ``HtmlBuilder`` class it will be necessary to implement a ``feed()`` method
-that can accept both strings and Thunks. The approach taken here will be to feed a
-placeholder string to the parser each time a Thunk is encountered, and to append the
-value of that Thunk's expression to a list. For example, given the following tag
-string::
+Now that you've learned how to turn HTML strings into a tree of ``HtmlNode`` objects
+using a ``SimpleHtmlBuilder``, you can shift your focus towards adding interpolation and
+creating the final ``HtmlBuilder`` class. To create this ``HtmlBuilder`` class it will
+be necessary to implement a ``feed()`` method that can accept both strings and Thunks.
+The approach laid out below will feed a placeholder string to the parser each time a
+Thunk is encountered while appending the Thunk's corresponding the value to a list. For
+example, given the following tag string::
 
     html"<{tag} style={style} color=blue>{greeting}, {name}!</{tag}>"
 
@@ -511,7 +511,7 @@ The implementation of this logic can be written as::
                     )
                     super().feed(PLACEHOLDER)
 
-However, having done this, it will necessary to reconnect each instance of the
+However, having done this, you'll now need some way to reconnect each instance of the
 placeholder with its corresponding expression value when implementing
 ``handle_starttag`` and ``handle_data``. The easiest way to do this is to split the
 substituted string on the placeholder and zip the split string back together with the
@@ -520,14 +520,14 @@ expression values::
     def interleave_values(string: str, values: list[Any]) -> tuple[list[str | Any], list[Any]]:
         string_parts = string.replace("$", "$$").split(PLACEHOLDER)
 
-        interleaved_values: list[str] = []
+        interleaved: list[str] = []
         for s, v in zip(string_parts[:-1], values):
-            interleaved_values.append(s.replace("$$", "$"))
-            interleaved_values.append(v)
-        interleaved_values.append(string_parts[-1])
+            interleaved.append(s.replace("$$", "$"))
+            interleaved.append(v)
+        interleaved.append(string_parts[-1])
 
         return (
-            interleaved_values,
+            interleaved,
             # In case we don't use all the values, return those that remain.
             values[len(string_parts) - 1 :]
         )
@@ -551,11 +551,106 @@ Absent the parser, you could put ``interleave_values`` to use like this::
     result, _ = interleave_values(substituted_string, value)
     assert result == ["<", tag, " style=", style, "color=blue>", greeting, ", ", name, "!</", tag, ">"]
 
-Now in this case all expression values were used while interleaving the values. In the
-context of ``handle_starttag(tag, attrs)`` it won't necessarily be clear how many values
-should be consumed ahead of time. For example, in the ``attrs`` list, the ``style``
-attribute contains a substituted value but ``color`` does not. Thus, each time
-``interleave_values`` is called the remaining values need to be updated.
+In this case, all expression values were used while interleaving. In the context of
+``handle_starttag(tag, attrs)`` though, it won't necessarily be clear how many values
+should be consumed ahead of time. For example, given ``substituted_string``, the
+``style`` attribute contains a substituted value but ``color`` does not. Thus as you
+process each attribute you can't know ahead of time whether it contains an expression.
+As a result, you'll want to update your list of remaining values each time
+``interleave_values`` is called::
+
+    interleaved, values = interleave_values(string, values)
+
+With ``interleave_values`` implemented, you'll be able to write the remaining parser
+methods starting with ``handle_starttag``. The first challenge to tackle in
+``handle_starttag`` is dealing with any expressions that may have appeared in an
+element's tag name. For example, one could imaging a partially interpolated tag name
+like ``h{size}`` where ``size`` might be some integer. In this case you can just join
+the interleaved values together into one string::
+
+
+        def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+            interleaved_tag, self.values = interleave_values(tag, self.values)
+            node_tag = "".join(str(part) for part in interleaved_tag)
+            ...
+
+To tackle the ``attrs`, you'll want to consider the different ways they might be
+declared. In this tutorial you'll focus on dealing with the following cases where
+interpolations might happen in HTML attributes:
+
+1. The attribute's name is interpolated: ``<tag {attr}=value />``
+2. The attribute's value is interpolated: ``<tag attr={value} />``
+3. Attributes are declared with a dictionary (attribute expansion): ``<tag { {attr: value} } />``
+4. Some combination of 1-3
+
+In all other scenarios, attribute interpolation will be disallowed since such cases
+could be achieved using attribute expansion instead. For example, if you wanted to
+declare an attribute value which was partially interpolated (e.g. ``color=dark{color}``)
+you could do::
+
+    attrs = {"color": f"dark{color}"}
+    element = html"<h1 {attrs} />"
+
+Put into practice then::
+
+        def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+            tag_interleaved, self.values = interleave_values(tag, self.values)
+            node_tag = "".join(str(part) for part in tag_interleaved)
+
+            node_attrs: dict[Any, Any] = {}
+            for k, v in attrs:
+                if k == PLACEHOLDER:
+                    k = self.values.pop(0)
+                elif PLACEHOLDER in k:
+                    raise ValueError(f"Found partial interpolation in {k!r} - use attribute expansion instead")
+
+                if v is None:
+                    if isinstance(k, dict):
+                        node_attrs.update(k)  # attribute expansion - html"<tag { {'attr': value} } />"
+                    else:
+                        node_attrs[k] = True  # boolean attribute - html"<tag attr />"
+                elif v == PLACEHOLDER:
+                    v = self.values.pop(0)
+                elif PLACEHOLDER in v:
+                    raise ValueError(f"Found partial interpolation in {v!r} - use attribute expansion instead")
+                else:
+                    node_attrs[k] = v
+
+            ...
+
+The last thing to deal with in ``handle_starttag`` is to construct the actual
+``HtmlNode`` and add it to the ``stack``. This can be copied from the
+``SimpleHtmlBuilder`` with little modification::
+
+        def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+            tag_interleaved, self.values = interleave_values(tag, self.values)
+            node_tag = "".join(str(part) for part in tag_interleaved)
+
+            node_attrs: dict[Any, Any] = {}
+            for k, v in attrs:
+                if k == PLACEHOLDER:
+                    k = self.values.pop(0)
+                elif PLACEHOLDER in k:
+                    raise ValueError(f"Found partial interpolation in {k!r} - use attribute expansion instead")
+
+                if v is None:
+                    if isinstance(k, dict):
+                        node_attrs.update(k)  # attribute expansion - html"<tag { {'attr': value} } />"
+                    else:
+                        node_attrs[k] = True  # boolean attribute - html"<tag attr />"
+                elif v == PLACEHOLDER:
+                    v = self.values.pop(0)
+                elif PLACEHOLDER in v:
+                    raise ValueError(f"Found partial interpolation in {v!r} - use attribute expansion instead")
+                else:
+                    node_attrs[k] = v
+
+            this_node = HtmlNode(node_tag, node_attrs)
+            last_node = self.stack[-1]
+            last_node.children.append(this_node)
+            self.stack.append(this_node)
+
+
 
 
 `html` components
