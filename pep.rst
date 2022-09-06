@@ -1,26 +1,34 @@
 Abstract
 ========
 
-Introduce tag strings and tag functions.
+This PEP introduces tag strings, which enables Python developers to create and
+use their own custom tags (or prefixes) when working with string literals and
+any interpolation. Tag strings are based on a related idea in JavaScript,
+`tagged template literals
+https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Template_literals#tagged_templates`_,
+but they naturally extend string literal interpolation ("f-strings"), as
+introduced to Python with :pep:`498`. Tag strings have a Pythonic syntax for both
+the use of and the definition of tags.
 
 Motivation
 ==========
 
+Motivating example - HTML escaping
+----------------------------------
+
 Working with templates is a common need in Python programs. Popular packages
-include Jinja, which supports general purpose templating, and Django Templates,
+include Jinja, which supports general purpose templating; and Django Templates,
 which specifically support HTML. However, such templates use their own
 minilanguages and rules for resolving interpolations.
 
 Also popular for templating are f-strings. For producing formatted strings, they
-work well. Interpolations in f-strings support standard Python expressions with
-names resolved according to lexical scope. This combines well with other Python
-code, which makes it easy to reason about what happens. (In constrast, templating
-approaches that work by using dynamic scope via `sys._getframe` result in corner
-cases around the use of nested functions and related constructs like
-comprehensions.)
+work well and are consequently popular. Interpolations in f-strings support
+standard Python expressions with names resolved according to lexical scope. This
+use of lexical scope means it is straightforward to reason about how expressions
+are evaluated in interpolations.
 
 But for more general templating use, using f-strings can be problematic.
-Consider this example:
+Consider this HTML example:
 
 .. code-block:: python
 
@@ -35,47 +43,94 @@ course an existing solution in the stdlib:
 
     from html import escape
 
+    brothers = 'Click & Clack'
     s = f'<div>Hi, {escape(brothers)}!/>'
 
-But this solution requires always tracking any text that requires such escaping,
-including unsanitized, possibly malicious input (eg "Bobby Tables" attacks).
-There are numerous Q&A on StackOverflow discussing inappropriate usage of
-f-strings, such as generating code for HTML, shell, and SQL. Often the advice
-is, use a package like SQLAlchemy. (FIXME: battle tested, but what if one needs
-to write their own package?)
+Note that this input could also be "unsanitized" and directly from a user and
+therefore possibly a malicious injection attack; regardless it needs to be
+escaped.
 
- (FIXME: add some supporting citations for the above paragraph.)
+HTML also has the following additional cases to consider for escaping input,
+even if such interpolations are generally not sourced from user input. These
+cases depend on the context of the interpolations, specifically that they occur
+within attributes or the tag itself and for the
+specific attributes used:
 
-This is because f-strings are unaware of the context of their templating, among
-other limitations.
+* `HTML Attributes
+  https://developer.mozilla.org/en-US/docs/Web/HTML/Attributes`_, which
+  naturally correspond to a ``dict`` mapping as input. One possible way of
+  writing this is with a hypothetical function ``escape_attrs(dict: [str, Any])
+  -> str``. So this could be used like so: ``f'<div
+  {escape_attrs(attrs)}>...</div>''``
+
+* `Boolean attributes https://html.spec.whatwg.org/#boolean-attributes`_  where
+  the presence of the attribute indicates it is true, otherwise false. Example:
+  ``f'<input {escape_boolean('checked', checked)} ...>'``. In particular per
+  this spec, "[the] values 'true' and 'false' are not allowed on boolean
+  attributes. To represent a false value, the attribute has to be omitted
+  altogether."
+
+* `style attribute
+  https://developer.mozilla.org/en-US/docs/Web/HTML/Global_attributes/style`_,
+  which is of the form ``key: value``, separated by a semicolon, and taking in
+  account specific aspects of formatting values, such as colors with hashmarks.
+  Example: ``f'<div {escape_style(props)}...>'.
+
+Clearly, f-strings are not an ideal fit here. The context of the interpolations
+has to be considered, as we saw with these cases, and there are still additional
+contextual considerations:
+
+* Nesting such constructs to generate HTML require systematic tracking of
+  escapes.
+
+* Do we want to use a virtual DOM approach? This is not going to work well with
+  formatting strings directly, given the need to parse again to get the DOM. But
+  direct construction of DOMs with a standard function approach require more
+  setup with respect to tags and attributes to capture what can be done readily
+  in source HTML.
+
+* If we are looking at other output besides HTML, such as for logging, we may
+  want to lazily render the interpolations, because they are potentially
+  expensive and the logging level for that log means that the record will end
+  not being emitted.
+
+Introducing tag strings
+-----------------------
+
+The takeaway from looking at HTML templating is the importance of context for
+determining how to perform interpolations. Such context requires parsing the
+non-interpolated part of the string literal (in the body of the tag, or
+interpolated as attributes). Additionally, the context includes how any
+templating will be used.
 
 This PEP proposes an alternative approach, **tag strings**, which generalize
-f-strings. Tag strings are directly inspired by the use of tagged template
-literals]() in JavaScript. Tag strings enable the authoring and use of arbitrary
-undotted name prefixes (except those already reserved in Python), which we call
-**tags**.
+f-strings. Tag strings are directly inspired by the use of `tagged template
+literals
+https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Template_literals#tagged_templates`_
+in JavaScript. Tag strings enable the authoring and use of arbitrary undotted
+name prefixes (except those already reserved in Python), which we call **tags**.
 
-Parsing.
-
-In particular, we have the following generalization::
+In particular, we have the following generalization:
 
 * a f-string is a sequence of strings (possibly raw, with the ``fr`` prefix) and
   interpolations (including format specification and conversions, such as ``!r``
   for ``repr``). This sequence is **implicitly evaluated** by concatenating
-  these parts, and it results in a string.
+  these parts, and it results in a ``str``.
 
 * a tag string is a sequence of **raw** strings and **thunks**, which generalize
   such interpolations. This sequence is implicitly evaluated by calling the
-  **tag function** bound to the tag name and which can return **any value**.
+  **tag function** bound to the tag name with this sequence, and it can return
+  an object of ``Any`` type.
 
 This generalization means that tag strings can support a wide range of use
 cases, including HTML, SQL, lazy f-strings, and shell commands.
 
 Example tag usage - html
-========================
+------------------------
 
-Let's look at a starting example, where we will look at how to use an ``html``
-tag:
+Let's go back to the motivating example. This time we we will use a custom
+``html`` tag; as seen here, this tag can be imported from an arbitary module
+using standard import semantics:
 
 .. code-block:: python
 
@@ -84,15 +139,55 @@ tag:
     brothers = 'Click & Clack'
     dom = html'<div>Hi, {brothers}!/>'
 
-Importantly, ``html`` is a name bound to a tag function, as imported from
-``my_htmllib`` (with normal import semantics). Tag functions are responsible for
-parsing the tag string and working with any interpolations; they can return any
-value.
-
-Given tag strings, it's possibe to write code like the following:
+First, interpolations are represented by thunks, which are named tuples. This
+PEP proposes that the ``Thunk`` type can be imported from the ``typing`` module:
 
 .. code-block:: python
 
+    class Thunk(NamedTuple):
+        getvalue: Callable[[], Any]
+        raw: str
+        conv: str | None
+        formatspec: str | None
+
+Per the type definition, ``getvalue`` is a no-arg function that can return
+``Any`` value. For the ``brothers`` interpolation in the above example,
+``getvalue`` would be ``lambda: brothers``.
+
+The ``html`` tag function can be defined following this sketch:
+
+.. code-block:: python
+
+    from typing import Thunk
+
+    # define a DOM type...
+
+    def html(*args: str | Thunk) -> DOM:
+        for arg in args:
+            match arg:
+                case str():
+                    # parse arg in the context of an HTML template that
+                    # is being built
+                case getvalue, _, _, _:
+                    # interpolate `getvalue()` in this HTML template
+
+As a named tuple, thunks can be matched using a case statement either as a tuple
+(as above), or with respect to the class ``Thunk`` and any desired attributes to
+be structurally unpacked.
+
+.. note::
+
+    For more complete details on how to implement this fully using
+    ``html.parser`` in the `stdlib
+    https://docs.python.org/3/library/html.parser.html`_, see the companion
+    tutorial PEP.
+
+With an implemented ``html`` tag, it is then possible to write code like the
+following:
+
+.. code-block:: python
+
+    from typing import Any
     from my_htmllib import html, DOM
 
     def title(report: str, props: dict[str, Any], styling: dict[str, Any]) -> DOM:
@@ -103,20 +198,7 @@ Given tag strings, it's possibe to write code like the following:
     props = {FIXME, but include a boolean element}
     dom = title(report, props, styling)
 
-Example boolean:
-
-.. code-block:: html
-
-    <input type='checkbox' checked id={id}/>
-
-See https://html.spec.whatwg.org/, specifically https://html.spec.whatwg.org/#boolean-attributes:
-
-    The values "true" and "false" are not allowed on boolean attributes. To
-    represent a false value, the attribute has to be omitted altogether.
-
-https://html.spec.whatwg.org/#the-style-attribute
-
-It is also possible to recursively construct tag strings::
+It is also possible to recursively compose tag strings:
 
     FIXME todolist
 
@@ -129,25 +211,14 @@ interpolated expressions are Python expressions.
 Specification
 =============
 
-A tag string generalizes f-strings
-
-In the rest of this specification, ``mytag`` will be used for an arbitrary tag name:
-
-.. code-block:: python
-
-    mytag'Hi, {name}!'
+In the rest of this specification, ``mytag`` will be used for an arbitrary tag.
 
 Grammar
 -------
 
-tag - undotted name
-Such names cannot be a valid string prefix
-
-Other tag names that might be popular include ``html``, ``sql``, ``sh``.
-
-The tag name can be any undotted name that isn't an [existing valid string or bytes
-prefix](https://docs.python.org/3/reference/lexical_analysis.html#string-and-bytes-literals),
-namely the following:
+The tag name can be any **undotted** name that isn't an existing valid string or
+bytes prefix, as seen in the `lexical analysis specification
+https://docs.python.org/3/reference/lexical_analysis.html#string-and-bytes-literals`_:
 
 .. code-block:: text
 
@@ -156,21 +227,33 @@ namely the following:
 
     bytesprefix: "b" | "B" | "br" | "Br" | "bR" | "BR" | "rb" | "rB" | "Rb" | "RB"
 
-As with ordinary string literals, no whitespace can be between the tag and the quote.
+As with other string literals, no whitespace can be between the tag and the
+quote mark.
 
-Tags are undotted names. (This restriction could be relaxed to dotted names in
-the future, if there is a compelling example.)
+.. note::
 
-String concatenation
---------------------
+    The restriction to use undotted names can be relaxed to dotted names in the
+    future, if there is a compelling usage.
 
-Tag string concatenation is not supported, which is unlike other string
-literals.
-https://docs.python.org/3/reference/lexical_analysis.html#string-literal-concatenation
+No string concatenation
+-----------------------
 
-(It is possible to relax this in the future, but the expectation is that triple
-quoting is sufficient. If relaxed, results from tag evaluations would need to
-support the ``+`` operator with ``__add__`` and ``__radd__``.)
+Tag string concatenation isn't supported, which is `unlike other string literals
+https://docs.python.org/3/reference/lexical_analysis.html#string-literal-concatenation`_.
+
+.. note::
+
+    Tthe expectation is that triple quoting is sufficient. If string
+    concatenation is supported, results from tag evaluations would need to
+    support the ``+`` operator with ``__add__`` and ``__radd__``.
+
+Example
+-------
+
+.. code-block:: python
+
+    name = 'Knights Who Say "Ni!"'
+    obj = mytag'Hi, {name}!'
 
 
 String fragments
@@ -181,26 +264,16 @@ Raw strings
 Thunk
 -----
 
-The interpolation ``{name}`` is represented by a thunk, which is a tuple, more
-specifically a named tuple:
 
-.. code-block:: python
-
-    class Thunk(NamedTuple):
-        getvalue: Callable[[], Any]
-        raw: str
-        conv: str | None
-        formatspec: str | None
 
 .. note::
 
     In the CPython reference implementation, this would presumably use the equivalent
 https://docs.python.org/3/c-api/tuple.html#struct-sequence-objects (as done with
-for example ``stat_result``,
-https://docs.python.org/3/library/os.html#os.stat_result). A suitable import
-will be made available, say from ``typing``.
+for example ``os.stat_result`` https://docs.python.org/3/library/os.html#os.stat_result). A suitable importable type
+will be made available from ``typing``.
 
-In this example, the thunk is the following tuple:
+In the example above, the thunk is equivalent to the following tuple:
 
 .. code-block:: python
 
@@ -210,18 +283,16 @@ The lambda wrapping here, ``lambda: name``, uses the usual lexical scoping. As
 with f-strings, there's no need to use ``locals()``, ``globals()``, or frame
 introspection with ``sys._getframe`` to evaluate the interpolation.
 
-The expression source, ``'name'`` is available, which means there is no need to
-use ``inspect.getsource`` and then use column information to further look
-up/parse the expression source of the interpolation.
+The code of the expression source is , ``'name'`` is available, which means there is no need to
+use ``inspect.getsource``, or otherwise parse the source code to get this expression source.
 
 The conversion and format spec are both ``None``.
 
-In this example, ``tag`` is evaluated as follows:
+In this example, ``mytag`` is evaluated as follows:
 
 .. code-block:: python
 
-    tag(r'Hi, ', (lambda: name, 'name', None, None), r', welcome back!')
-
+    mytag(r'Hi, ', (lambda: name, 'name', None, None), r', welcome back!')
 
 Expression evaluation
 ---------------------
@@ -271,15 +342,20 @@ name. This is called the tag function, and it supports this signature:
     mytag(*args: str | Thunk):
         ...
 
+The type of tag functions in general is:
+
+.. code-block:: python
+
+    Callable[[list[str | Thunk]], Any]
+
+    (FIXME check starargs)
+
 
 Interpolations and thunks
 -------------------------
 
 TODO: this needs to be changed in the reference implementation/discussed in
-issues, specifically bikeshedding. It would seem to be better used as a
-protocol, for flexibility.
-
-
+issues, specifically bikeshedding.
 
 A **thunk** encodes the interpolation. Its type is the equivalent of the
 following:
@@ -331,28 +407,30 @@ This has the equivalent type of:
 
     Callable[[str | Thunk, ...], Any]
 
-
 Roundtripping limitations
---------------------------
+-------------------------
 
-There are two limitations with respect to roundtripping to the exact original raw text.
+There are two limitations with respect to roundtripping to the exact original
+raw text.
 
 First, the ``formatspec`` can be arbitrarily nested:
 
 .. code-block:: python
 
-    tag'{x:{a{b{c}}}}'
+    mytag'{x:{a{b{c}}}}'
 
 However, in this PEP and corresponding reference implementation, the formatspec
 is eagerly evaluated to get the ``formatspec`` in the thunk.
-``c``).
 
-Secondly, ``tag'{expr=}'`` is parsed to being the same as ``tag'expr={expr}``'
+Secondly, ``mytag'{expr=}'`` is parsed to being the same as
+``mytag'expr={expr}``', as implemented in the issue `Add = to f-strings for
+easier debugging https://github.com/python/cpython/issues/80998`_.
 
 While it would be feasible to preserve roundtripping in every usage, this would
-require an extra flag ``equals`` for ``{x=}`` and a recursive ``Thunk``
-definition for ``formatspec``. The following is roughly the pure Python
-equivalent of this type, including preserving the sequence unpacking:
+require an extra flag ``equals`` to support, for example, ``{x=}``, and a
+recursive ``Thunk`` definition for ``formatspec``. The following is roughly the
+pure Python equivalent of this type, including preserving the sequence
+unpacking:
 
 .. code-block:: python
 
@@ -369,8 +447,7 @@ equivalent of this type, including preserving the sequence unpacking:
         def __iter__(self):
             return iter((self.getvalue, self.raw, self.conv, self.formatspec))
 
-This additional complexity seems unnecessary.
-
+However, this additional complexity seems unnecessary and is thus rejected.
 
 Example tag implementation - fl
 ===============================
@@ -444,7 +521,6 @@ In a nutshell: for each string, encode as bytes in UTF-8 format, then decoded
 back as a string, applying any escapes, while maintaining the underlying Unicode
 codepoints. There may be a better way, but this conversion uses the same
 internal code path as Python's parser.
-
 
 Memoizing parses
 -----------------
@@ -546,5 +622,6 @@ an ``i`` prefix, with the following tag function:
 References
 ==========
 
-https://github.com/python/cpython/issues/80998
-Add = to f-strings for easier debugging
+`Add = to f-strings for easier debugging
+https://github.com/python/cpython/issues/80998`_
+
