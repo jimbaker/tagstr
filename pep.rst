@@ -129,7 +129,7 @@ Example tag usage - html
 ------------------------
 
 Let's go back to the motivating example. This time we we will use a custom
-``html`` tag; as seen here, this tag can be imported from an arbitary module
+``html`` tag; as seen here, this tag can be imported from an arbitrary module
 using standard import semantics:
 
 .. code-block:: python
@@ -216,8 +216,8 @@ In the rest of this specification, ``mytag`` will be used for an arbitrary tag.
 Grammar
 -------
 
-The tag name can be any **undotted** name that isn't an existing valid string or
-bytes prefix, as seen in the `lexical analysis specification
+The tag name can be any **undotted** name that isn't already an existing valid
+string or bytes prefix, as seen in the `lexical analysis specification
 https://docs.python.org/3/reference/lexical_analysis.html#string-and-bytes-literals`_:
 
 .. code-block:: text
@@ -243,7 +243,7 @@ https://docs.python.org/3/reference/lexical_analysis.html#string-literal-concate
 
 .. note::
 
-    Tthe expectation is that triple quoting is sufficient. If string
+    The expectation is that triple quoting is sufficient. If string
     concatenation is supported, results from tag evaluations would need to
     support the ``+`` operator with ``__add__`` and ``__radd__``.
 
@@ -346,10 +346,9 @@ The type of tag functions in general is:
 
 .. code-block:: python
 
-    Callable[[list[str | Thunk]], Any]
-
-    (FIXME check starargs)
-
+    class Tag(Protocol):
+        def __call__(self, *args: str | Thunk) -> Any:
+            ...
 
 Interpolations and thunks
 -------------------------
