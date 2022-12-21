@@ -12,7 +12,7 @@ from taglib import decode_raw, Thunk, format_value
 def demo():
     color = "blue"
     attrs = {"style": {"font-size": "bold", "font-family": "mono"}}
-    dom = html"<a {attrs} color=dark{color} >{html'<h{i}/>' for i in range(1, 4)}</a>"
+    # dom = html"<a **{attrs} color=dark{color} >{html'<h{i}/>' for i in range(1, 4)}</a>"
     print(dom.render(indent=2))
     print(repr(dom))
 
@@ -119,16 +119,18 @@ class HtmlNodeParser(HTMLParser):
         node_attrs = {}
         for k, v in attrs:
             if v is not None:
-                _disallow_interpolation(k, "use attribute expansion instead")
+                k, self.values = join_with_values(v, self.values)
                 node_attrs[k], self.values = join_with_values(v, self.values)
-            elif k == PLACEHOLDER:
+            elif k == f"**{PLACEHOLDER}":
                 attribute_expansion, *self.values = self.values
                 if not isinstance(attribute_expansion, dict):
                     raise TypeError("Expected a dictionary for attribute expension")
                 node_attrs.update(attribute_expansion)
-            else:
-                _disallow_interpolation(k, "use attribute expansion instead")
+            else:  # handle boolean attributes
+                k, self.values = join_with_values(v, self.values)
                 node_attrs[k] = True
+
+        # At this point all interpolated values should have been consumed.
         assert not self.values, "Did not interpolate all values"
 
         this_node = HtmlNode(tag, node_attrs)
@@ -168,27 +170,25 @@ def unescape_placeholder(string: str) -> str:
     return string.replace("$$", "$")
 
 
-def join_with_values(string, values) -> tuple[str, list[Any]]:
+def join_with_values(string: str, values: list[Any]) -> tuple[str, list[Any]]:
     interleaved_values, remaining_values = interleave_with_values(string, values)
     return "".join(map(str, interleaved_values)), remaining_values
 
 
-def interleave_with_values(string, values) -> tuple[list[str | Any], list[Any]]:
-    string_parts = string.split(PLACEHOLDER)
-    remaining_values = values[len(string_parts) - 1 :]
+def interleave_with_values(
+    string: str, values: list[Any]
+) -> tuple[list[str | Any], list[Any]]:
+    *string_parts, last_string_part = string.split(PLACEHOLDER)
+    remaining_values = values[len(string_parts) :]
 
-    interleaved_values: list[str] = []
-    for s, v in zip(string_parts[:-1], values):
-        interleaved_values.append(unescape_placeholder(s))
-        interleaved_values.append(v)
-    interleaved_values.append(string_parts[-1])
+    interleaved_values = [
+        item
+        for s, v in zip(string_parts, values)
+        for item in (unescape_placeholder(s), v)
+    ]
+    interleaved_values.append(last_string_part)
 
     return interleaved_values, remaining_values
-
-
-def _disallow_interpolation(string: str, reason: str) -> None:
-    if PLACEHOLDER in string:
-        raise ValueError(f"Cannot interpolate {string} - {reason}")
 
 
 if __name__ == "__main__":
