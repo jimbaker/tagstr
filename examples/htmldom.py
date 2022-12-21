@@ -12,8 +12,9 @@ from taglib import decode_raw, Thunk, format_value
 def demo():
     color = "blue"
     attrs = {"style": {"font-size": "bold", "font-family": "mono"}}
-    dom = html"<a {attrs} color=dark{color} >{html'<h{i}/>' for i in range(1, 4)}</a>".render(indent=2)
-    print(dom)
+    dom = html"<a {attrs} color=dark{color} >{html'<h{i}/>' for i in range(1, 4)}</a>"
+    print(dom.render(indent=2))
+    print(repr(dom))
 
 
 def html(*args: str | Thunk) -> str:
@@ -29,7 +30,7 @@ HtmlAttributes = dict[str, str | bool | dict[str, str]]
 
 @dataclass
 class HtmlNode:
-    tag: str = field(default_factory=str)
+    tag: str = ""
     attributes: HtmlAttributes = field(default_factory=dict)
     children: HtmlChildren = field(default_factory=list)
 

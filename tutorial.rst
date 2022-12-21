@@ -177,9 +177,9 @@ Applications in templating
 Tag strings also find applications where complex string interpolation would otherwise
 require a templating engine like Jinja. Such engines typically come along with a Domain
 Specific Language (DSL) for declaring templates that, given some contextual data, can be
-compiled into larger bodies of text. An especially common use case for such engines is
-the construction of HTML documents. For example, if you wanted to create a simple todo
-list using Jinja it might look something like this::
+compiled into larger bodies of text. An especially common use case for templating
+engines is the construction of HTML documents. For example, if you wanted to create a
+simple todo list using Jinja it might look something like this::
 
     from jinja2 import Template
 
@@ -194,7 +194,7 @@ list using Jinja it might look something like this::
 
     print(doc)
 
-Which will render::
+Which will render as::
 
     <h1>My Todo List</h1>
     <ol>
@@ -204,7 +204,7 @@ Which will render::
     </ol>
 
 This is simple enough, but Jinja templates can grow rapidly in complexity. For example,
-if we want to dynamically set attributes on the ``<li>`` elements the Jinja template
+if you want to dynamically set attributes on the ``<li>`` elements the Jinja template
 it's far less straightforward::
 
     from jinja2 import Template
@@ -260,11 +260,13 @@ needs that come with rendering HTML, like expanding dynamic attributes, aren't s
 out of the box. More broadly, Jinja templates make it difficult to coordinate business
 and UI logic since markup in the template is kept separate from your logic in Python.
 
-Thankfully though, string tags give us an opportunity to develop a syntax specifically
+Thankfully though, string tags provide an opportunity to develop a syntax specifically
 designed to make declaring elaborate HTML documents easier. In the tutorial to follow,
-you'll learn how to create an ``html`` tag which can do just this. Specifically, we'll
-be taking inspiration from the JSX in order to bring your markup and logic closer
-together. Here's a couple examples of what it will be able to do::
+you'll learn how to create an ``html`` tag which can do just this. Specifically, the
+tutorial will bring your markup and logic closer together by taking inspiration from
+`JSX <https://reactjs.org/docs/introducing-jsx.html>`__, a syntax extension to
+JavaScript commonly used in `ReactJS <https://reactjs.org/>`__ projects. Here's a couple
+examples of what it you'll be able to do::
 
     # Attribute expansion
     attributes = {"color": "blue", "style": {"font-weight": "bold"}}
@@ -289,8 +291,9 @@ representation of the HTML that can be freely manipulated - a Document Object Mo
     node.children.append("Hello, world!")
     assert node.render() == '<h1 color="blue">Hello, world!</h1>'
 
-Where ``HtmlNode`` is defined as:
+.. _HtmlNode short:
 
+Where ``HtmlNode`` is defined as::
 
     HtmlAttributes = dict[str, Any]
     HtmlChildren = list[str, "HtmlNode"]
@@ -304,6 +307,10 @@ Where ``HtmlNode`` is defined as:
 
         def render(self) -> str:
             ...
+
+.. note::
+
+    A complete implementation of ``HtmlNode`` is shown in `Appendix A`_.
 
 This capability in particular is one which would be impossible, or at the very least
 convoluted, to achieve with a templating engine like Jinja. By returning a DOM instead
@@ -356,9 +363,10 @@ Writing an ``html`` tag
 In contrast to the ``sh`` tag, which did not need to do any parsing, the ``html`` tag
 must parse the HTML it receives since, in order to perform attribute expansions and
 recursive construction it needs to know the semantic meaning of values it will
-interpolate. Thankfully though, Python comes with a built in ``html.parser`` module that
-that we can build atop. Given this, the implementation of ``html`` will look a bit like
-this::
+interpolate. Thankfully though, Python comes with a built in :mod:`html.parser` module
+with an :class:`~html.parser.HTMLParser` class that can be extended. The code below
+shows a template for implementing the ``html`` tag with method stubs that will be
+fleshed out in future sections::
 
     from dataclasses import dataclass, field
     from html.parser import HTMLParser
@@ -368,16 +376,6 @@ this::
         for data in args:
             builder.feed(data)
         return builder.result()
-
-    @dataclass
-    class HtmlNode:
-        """A single HTML document object model node"""
-
-        tag: str = field(default_factory=str)
-        attributes: HtmlAttributes = field(default_factory=dict)
-        children: HtmlChildren = field(default_factory=list)
-
-        def render(self) -> str: ...
 
     class HtmlBuilder(HTMLParser):
         """Construct HtmlNodes from strings and thunks"""
@@ -389,22 +387,79 @@ this::
         def handle_data(self, data: str) -> None: ...
         def handle_endtag(self, tag: str) -> None: ...
 
-Where the ``html`` tag will feed each of its strings and thunks to an ``HtmlBuilder``
-until its ``args`` have been exhausted. At which point it can return the resulting
-interpolated tree of ``HtmlNode`` objects. ``HtmlBuilder`` then, being a subclass of
-``HTMLParser``, will implement the necessary ``handle_*`` methods to accomplish this.
+This template defines an ``html`` tag function that feeds each of its strings and thunks
+to an ``HtmlBuilder`` instance until its ``args`` have been exhausted. At which point it
+can return the resulting interpolated tree of ``HtmlNode`` objects `from earlier
+<HtmlNode short>`_. ``HtmlBuilder`` then, being a subclass of ``HTMLParser``, will
+implement the necessary ``handle_*`` methods to accomplish this.
 
+The sections that follow will address how to fill out this template and...
+
+- `(1) <A simple HTML builder>`_ Implement a simple HTML builder that converts strings
+  into a tree of ``HtmlNode`` objects.
+- `(2) <An HTML builder with interpolations>`_ Create an HTML builder that can
+  interpolate thunk values into that tree of ``HtmlNode`` objects.
+- `(3) <HTML components>`_ Expand upon the HTML builder pattern to allow users to define
+  custom, reusable HTML elements, called "components".
+
+
+.. _A simple HTML builder:
 
 A simple HTML builder
 .....................
 
-The vast majority of the work in implementing the ``html`` tag lies in the
-``HtmlBuilder``. Further, much of the difficulties in its implementations stem from
-the fact that it must interpolate values from thunks into the resulting HtmlNode tree.
-To get to grips with how to proceed, its useful to consider how one might implement a
-``SimpleHtmlBuilder`` which does not interpolate values::
+Before jumping in to create a fully featured ``html`` tag implementation, it's useful to
+consider how to create a ``SimpleHtmlBuilder`` that only focuses on extending Python's
+built-in :class:`~html.parser.HTMLParser` class in order to parse HTML strings into a
+tree of ``HtmlNode`` objects. Here's a snippet from the docs which describes how
+``HTMLParser`` works and what you'll need to do to accomplish this:
 
-    # TODO: add comments to the code
+    An :class:`.HTMLParser` instance is fed HTML data and calls handler methods when
+    start tags, end tags, text, comments, and other markup elements are encountered. The
+    user should subclass :class:`.HTMLParser` and override its methods to implement the
+    desired behavior.
+
+To get to grips with exactly what the docs are saying here, take a look at the class
+below which just prints out the arguments passed to each of the stubbed handler methods
+from the template::
+
+    from html.parser import HTMLParser
+
+    class HtmlPrinter(HTMLParser):
+        def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+            attr_str = " ".join(k if v is None else f"{k}={v}" for k, v in attrs)
+            print(f"Started making element: <{tag}{f' {attr_str} ' if attr_str else ''}>")
+
+        def handle_data(self, data: str) -> None:
+            print(f"Adding element body text: {data!r}")
+
+        def handle_endtag(self, tag: str) -> None:
+            print(f"Finished creating element: </{tag}>")
+
+    html_printer = HtmlPrinter()
+    html_printer.feed('<h1 color="blue">Hello, <b>world</b>!</h1>')
+
+Which prints::
+
+    Started making element: <h1 color=blue >
+    Adding element body text: 'Hello, '
+    Started making element: <b>
+    Adding element body text: 'world'
+    Finished creating element: </b>
+    Adding element body text: '!'
+    Finished creating element: </h1>
+
+What this shows, is that in order to use ``HTMLParser`` to construct ``HtmlNode``
+objects, you'll need a way to track which element is currently being constructed at any
+point while text is being fed to the parser. This will allow you to append newly created
+child elements and body text to the appropriate parent element. A handy insight is that
+you can use a data structure called a `"stack"
+<https://en.wikipedia.org/wiki/Stack_(abstract_data_type)>`__ to do just this. Knowing
+that, that main work is in keeping the stack up to date. This involves appending new
+``HtmlNode`` objects to the stack at each ``handle_starttag()`` call and then popping at
+each ``handle_endtag()`` call. In this way, when ``handle_data()`` is called, the
+builder knows that the last element in the stack is the currently active node. Here's
+what that looks like in practice::
 
     class SimpleHtmlBuilder(HTMLParser):
         """Construct HtmlNodes from strings and thunks"""
@@ -442,18 +497,11 @@ To get to grips with how to proceed, its useful to consider how one might implem
     HTML attributes. Where ``HTMLParser`` treats the value of such attributes as
     ``None`` ``SimpleHtmlBuilder`` converts them to ``True``.
 
-The key insight of ``SimpleHtmlBuilder`` is that, in order to create the tree of
-``HtmlNode`` objects, you must keep track of the node which is currently being
-constructed using stack data structure. Knowing this, the main work is in keeping the
-stack up to date. This involves appending to the stack at each ``handle_starttag()``
-call and then popping at each ``handle_endtag()`` call. In this way, when
-``handle_data()`` is called, the builder knows which node to append a child to.
-
 The remaining detail of ``result()`` is to handle the case where one or more elements
 lie at the root of the document passed to the parser. In the case where there's one node
 which has been added to the builder's ``root.children`` that single node is returned.
 However, if there's more than one node that has been added, the solution is to return
-the ``root`` node itself. This is how it works in practice::
+the ``root`` node itself. This is how ``SimpleHtmlBuilder`` handles these two cases::
 
     single_node = SimpleHtmlBuilder().feed("<div><h1/><h2/></div>").result()
     assert single_root == HtmlNode("div", [HtmlNode("h1"), HtmlNode("h2")])
@@ -467,8 +515,10 @@ the ``root`` node itself. This is how it works in practice::
     will ultimately be stripped from HTML strings produced by ``HtmlNode.render()``.
 
 
-An HTML builder with interpolation
-..................................
+.. _An HTML builder with interpolations:
+
+An HTML builder with interpolations
+...................................
 
 Now that you've learned how to turn HTML strings into a tree of ``HtmlNode`` objects
 using a ``SimpleHtmlBuilder``, you can shift your focus towards adding interpolation and
@@ -568,13 +618,12 @@ element's tag name. For example, one could imaging a partially interpolated tag 
 like ``h{size}`` where ``size`` might be some integer. In this case you can just join
 the interleaved values together into one string::
 
-
         def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
             interleaved_tag, self.values = interleave_values(tag, self.values)
             node_tag = "".join(str(part) for part in interleaved_tag)
             ...
 
-To tackle the ``attrs`, you'll want to consider the different ways they might be
+To tackle the ``attrs``, you'll want to consider the different ways they might be
 declared. In this tutorial you'll focus on dealing with the following cases where
 interpolations might happen in HTML attributes:
 
@@ -651,12 +700,13 @@ The last thing to deal with in ``handle_starttag`` is to construct the actual
             self.stack.append(this_node)
 
 
+.. _HTML components:
 
-
-`html` components
-.................
+HTML components
+...............
 
 TODO: show how you can expand html tag to allow for HTML components
+
 
 `fl` tag - lazy interpolation of f-strings
 ------------------------------------------
@@ -764,7 +814,7 @@ further extend this example by looking at other possible caching.
 
 The beginning of the tutorial introduced a shell injection attack, as
 popularized by xkcd with "Bobby Tables." Of course, the `original injection in
-the xkcd comic <https://xkcd.com/327/>`_ was for SQL::
+the xkcd comic <https://xkcd.com/327/>`__ was for SQL::
 
     name = "Robert') DROP TABLE students; --"
 
@@ -990,7 +1040,73 @@ parameters so they don't collide (via a simple renaming)::
                     text.append(analyze_sql(subparts, bindings, param_counts)[0])
         return ''.join(text), bindings
 
-`html` tag, revisited
----------------------
 
-TODO: compilation to a virtual DOM object, such as used in Reactive
+.. _Appendix A:
+
+Appendix A: Full implementation of ``HtmlNode``
+===============================================
+
+Below is a full implementation of the ``HtmlNode`` class introduced `here <HtmlNode
+short>`_::
+
+    from dataclasses import dataclass, field
+    from html import escape
+
+    HtmlChildren = list[str, "HtmlNode"]
+    HtmlAttributes = dict[str, str | bool | dict[str, str]]
+
+    @dataclass
+    class HtmlNode:
+        tag: str = field(default_factory=str)
+        attributes: HtmlAttributes = field(default_factory=dict)
+        children: HtmlChildren = field(default_factory=list)
+
+        def render(self, *, indent: int = 0, depth: int = 0) -> str:
+            tab = " " * indent * depth
+
+            attribute_list: list[str] = []
+            for key, value in self.attributes.items():
+                match key, value:
+                    case _, True:
+                        attribute_list.append(f" {key}")
+                    case _, False | None:
+                        pass
+                    case "style", style:
+                        if not isinstance(style, dict):
+                            raise TypeError("Expected style attribute to be a dictionary")
+                        css_string = escape("; ".join(f"{k}:{v}" for k, v in style.items()))
+                        attribute_list.append(f' style="{css_string}"')
+                    case _:
+                        attribute_list.append(f' {key}="{escape(str(value))}"')
+
+            children_list: list[str] = []
+            for item in self.children:
+                match item:
+                    case str():
+                        item = escape(item, quote=False)
+                    case HtmlNode():
+                        item = item.render(indent=indent, depth=depth + 1)
+                    case _:
+                        item = str(item)
+                children_list.append(item)
+
+            if indent:
+                assert indent > 0
+                children_list = [f"\n{tab}{child}" for child in children_list]
+
+            body = "".join(children_list)
+
+            if not self.tag:
+                if self.attributes:
+                    raise ValueError("Untagged node cannot have attributes.")
+                result = body
+            else:
+                attr_body = "".join(attribute_list)
+                if body:
+                    result = f"{tab}<{self.tag}{attr_body}>{body}\n{tab}</{self.tag}>"
+                else:
+                    result = f"{tab}<{self.tag}{attr_body}>{body}</{self.tag}>"
+
+            return result
+
+        __str__ = render
