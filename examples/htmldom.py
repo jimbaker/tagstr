@@ -12,7 +12,7 @@ from taglib import decode_raw, Thunk, format_value
 def demo():
     color = "blue"
     attrs = {"style": {"font-size": "bold", "font-family": "mono"}}
-    # dom = html"<a **{attrs} color=dark{color} >{html'<h{i}/>' for i in range(1, 4)}</a>"
+    dom = html"<a **{attrs} color=dark{color} >{html'<h{i}/>' for i in range(1, 4)}</a>"
     print(dom.render(indent=2))
     print(repr(dom))
 
@@ -106,12 +106,13 @@ class HtmlNodeParser(HTMLParser):
     def result(self) -> HtmlNode:
         root = self.root
         self.close()
-        if (len_root_children := len(root.children)) == 0:
-            raise ValueError("Nothing to return")
-        elif len_root_children == 1:
-            return root.children[0]
-        else:
-            return root
+        match root.children:
+            case []:
+                raise ValueError("Nothing to return")
+            case [child]:
+                return child
+            case _:
+                return self.root
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         tag, self.values = join_with_values(tag, self.values)

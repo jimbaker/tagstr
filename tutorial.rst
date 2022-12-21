@@ -363,65 +363,35 @@ Writing an ``html`` tag
 In contrast to the ``sh`` tag, which did not need to do any parsing, the ``html`` tag
 must parse the HTML it receives since, in order to perform attribute expansions and
 recursive construction it needs to know the semantic meaning of values it will
-interpolate. Thankfully though, Python comes with a built in :mod:`html.parser` module
-with an :class:`~html.parser.HTMLParser` class that can be extended. The code below
-shows a template for implementing the ``html`` tag with method stubs that will be
-fleshed out in future sections::
-
-    from dataclasses import dataclass, field
-    from html.parser import HTMLParser
-
-    def html(*args: str | Thunk) -> HtmlNode:
-        builder = HtmlBuilder()
-        for data in args:
-            builder.feed(data)
-        return builder.result()
-
-    class HtmlBuilder(HTMLParser):
-        """Construct HtmlNodes from strings and thunks"""
-
-        def feed(self, data: str | Thunk) -> None: ...
-        def result(self) -> HtmlNode: ...
-
-        def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None: ...
-        def handle_data(self, data: str) -> None: ...
-        def handle_endtag(self, tag: str) -> None: ...
-
-This template defines an ``html`` tag function that feeds each of its strings and thunks
-to an ``HtmlBuilder`` instance until its ``args`` have been exhausted. At which point it
-can return the resulting interpolated tree of ``HtmlNode`` objects `from earlier
-<HtmlNode short>`_. ``HtmlBuilder`` then, being a subclass of ``HTMLParser``, will
-implement the necessary ``handle_*`` methods to accomplish this.
-
-The sections that follow will address how to fill out this template and...
+interpolate. Over the course of this tutorial, you'll learn how to:
 
 - `(1) <A simple HTML builder>`_ Implement a simple HTML builder that converts strings
   into a tree of ``HtmlNode`` objects.
-- `(2) <An HTML builder with interpolations>`_ Create an HTML builder that can
+- `(2) <An HTML builder with interpolations>`_ Create an ``html`` tag that can
   interpolate thunk values into that tree of ``HtmlNode`` objects.
-- `(3) <HTML components>`_ Expand upon the HTML builder pattern to allow users to define
+- `(3) <HTML components>`_ Expand the ``html`` tag from earlier to allow users to define
   custom, reusable HTML elements, called "components".
-
 
 .. _A simple HTML builder:
 
-A simple HTML builder
-.....................
+Given that you're going to be parsing HTML, it will be useful to lean on Python's
+built-in :class:`~html.parser.HTMLParser` which can be subclassed to customize its
+behavior. Here's a section from its documentation that will help you get aquainted with
+how this parser class can be extended:
 
-Before jumping in to create a fully featured ``html`` tag implementation, it's useful to
-consider how to create a ``SimpleHtmlBuilder`` that only focuses on extending Python's
-built-in :class:`~html.parser.HTMLParser` class in order to parse HTML strings into a
-tree of ``HtmlNode`` objects. Here's a snippet from the docs which describes how
-``HTMLParser`` works and what you'll need to do to accomplish this:
+    An :class:`~html.parser.HTMLParser` instance is fed HTML data and calls handler
+    methods when start tags, end tags, text, comments, and other markup elements are
+    encountered. The user should subclass :class:`~html.parser.HTMLParser` and override
+    its methods to implement the desired behavior.
 
-    An :class:`.HTMLParser` instance is fed HTML data and calls handler methods when
-    start tags, end tags, text, comments, and other markup elements are encountered. The
-    user should subclass :class:`.HTMLParser` and override its methods to implement the
-    desired behavior.
+Specifically, to modify ``HTMLParser`` in order to  you'll need to overwrite the following methods:
 
-To get to grips with exactly what the docs are saying here, take a look at the class
-below which just prints out the arguments passed to each of the stubbed handler methods
-from the template::
+- :meth:`~html.parser.HTMLParser.handle_starttag` - handles the start tag of an element (``<div id="something">``).
+- :meth:`~html.parser.HTMLParser.handle_data` - processes text in the body of an element (``<div>arbitrary text</div>``).
+- :meth:`~html.parser.HTMLParser.handle_endtag` - handles the end tag of an element (``</div>``).
+
+To get a better idea for how to do this, take a look at the ``HtmlPrinter`` class below
+which just displayes the arguments that get passed to these methods::
 
     from html.parser import HTMLParser
 
@@ -438,6 +408,7 @@ from the template::
 
     html_printer = HtmlPrinter()
     html_printer.feed('<h1 color="blue">Hello, <b>world</b>!</h1>')
+    html_printer.close()
 
 Which prints::
 
@@ -455,29 +426,19 @@ point while text is being fed to the parser. This will allow you to append newly
 child elements and body text to the appropriate parent element. A handy insight is that
 you can use a data structure called a `"stack"
 <https://en.wikipedia.org/wiki/Stack_(abstract_data_type)>`__ to do just this. Knowing
-that, that main work is in keeping the stack up to date. This involves appending new
-``HtmlNode`` objects to the stack at each ``handle_starttag()`` call and then popping at
+that, that main work is in keeping the stack up to date by appending new ``HtmlNode``
+objects to the stack at each ``handle_starttag()`` call and then popping them off at
 each ``handle_endtag()`` call. In this way, when ``handle_data()`` is called, the
 builder knows that the last element in the stack is the currently active node. Here's
 what that looks like in practice::
 
-    class SimpleHtmlBuilder(HTMLParser):
+    class HtmlBuilder(HTMLParser):
         """Construct HtmlNodes from strings and thunks"""
 
         def __init__(self):
             super().__init__()
             self.root = HtmlNode()
             self.stack = [self.root]
-
-        def result(self) -> HtmlNode:
-            root = self.root
-            self.close()
-            if (len_root_children := len(root.children)) == 0:
-                raise ValueError("Nothing to return")
-            elif len_root_children == 1:
-                return root.children[0]
-            else:
-                return root
 
         def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
             this_node = HtmlNode(tag, {k: (v or True) for k, v in attrs.items()})
@@ -495,42 +456,72 @@ what that looks like in practice::
 
     This implementation includes a minor editorial decision in the handling of boolean
     HTML attributes. Where ``HTMLParser`` treats the value of such attributes as
-    ``None`` ``SimpleHtmlBuilder`` converts them to ``True``.
+    ``None`` ``HtmlBuilder`` converts them to ``True``.
 
-The remaining detail of ``result()`` is to handle the case where one or more elements
-lie at the root of the document passed to the parser. In the case where there's one node
-which has been added to the builder's ``root.children`` that single node is returned.
-However, if there's more than one node that has been added, the solution is to return
-the ``root`` node itself. This is how ``SimpleHtmlBuilder`` handles these two cases::
+Now, you could use this ``HtmlBuilder`` class in the following way::
 
-    single_node = SimpleHtmlBuilder().feed("<div><h1/><h2/></div>").result()
-    assert single_root == HtmlNode("div", [HtmlNode("h1"), HtmlNode("h2")])
+    builder = HtmlBuilder()
+    builder.feed("<div><h1/><h2/></div>")
+    builder.close()
+    html_node_tree = builder.root.children[0]
+    assert html_node_tree == HtmlNode("div", [HtmlNode("h1"), HtmlNode("h2")])
 
-    multi_node = SimpleHtmlBuilder().feed("<h1/><h2/>").result()
-    assert multi_node == HtmlNode("", [HtmlNode("h1"), HtmlNode("h2")])
+To simplify the process of closing the builder and extracting the ``HtmlNode`` tree, you
+can add a ``result()`` method::
+
+        def result(self) -> HtmlNode:
+            root = self.root
+            self.close()
+            match root.children:
+                case []:
+                    raise ValueError("Nothing to return")
+                case [element]:
+                    # Return the root
+                    return element
+                case _:
+                    # Handle case of an HTML fragment where there is more than one
+                    # outer-most element by returning the root wrapper element.
+                    return root
 
 .. note::
 
     "Untagged" nodes, like the ``root``, whose ``tag`` attribute is an empty string,
     will ultimately be stripped from HTML strings produced by ``HtmlNode.render()``.
 
+With this convenience method you can now do::
+
+    builder = HtmlBuilder()
+    builder.feed("<div><h1/><h2/></div>")
+    html_node_tree = builder.result()
+    assert html_node_tree == HtmlNode("div", [HtmlNode("h1"), HtmlNode("h2")])
 
 .. _An HTML builder with interpolations:
 
-An HTML builder with interpolations
-...................................
+This is pretty neat! Unfortunately though, this isn't quite enough to create an ``html``
+tag that can interpolate values because, at this point, the ``feed()`` method of your
+``HtmlBuilder`` only accepts strings. To use this in an ``html`` tag it will need to
+accept both strings and Thunks. Ultimately you'll want to be able to write the following
+tag function::
 
-Now that you've learned how to turn HTML strings into a tree of ``HtmlNode`` objects
-using a ``SimpleHtmlBuilder``, you can shift your focus towards adding interpolation and
-creating the final ``HtmlBuilder`` class. To create this ``HtmlBuilder`` class it will
-be necessary to implement a ``feed()`` method that can accept both strings and Thunks.
-The approach laid out below will feed a placeholder string to the parser each time a
-Thunk is encountered while appending the Thunk's corresponding the value to a list. For
-example, given the following tag string::
+    from taglib import decode_raw, Thunk
+
+    def html(*args: str | Thunk) -> HtmlNode:
+        builder = HtmlBuilder()
+        for arg in decode_raw(*args):
+            builder.feed(arg)
+        return builder.result()
+
+The question then is, how should the ``feed()`` method behave, such that, when a
+``Thunk`` is passed to it, the handler methods of your ``HtmlBuilder`` will be able to
+interpolate it later. One way you could do this would be to pass a placeholder string to
+the parser each time a thunk is encountered and store the thunk's value for later use.
+Then, in the handler methods, each time you encountered a placeholder in an element's
+tag, attribute name, or attribute value, you could substitute the placeholder for the
+corresponding stored value. For example, given the following tag string::
 
     html"<{tag} style={style} color=blue>{greeting}, {name}!</{tag}>"
 
-The ``feed()`` method will substitute each expression with the placeholder ``{$}`` such
+The ``feed()`` method would substitute each expression with the placeholder ``{$}`` so
 that the parser receives the string::
 
     "<{$} style={$} color=blue>{$}, {$}!</{$}>"
@@ -547,7 +538,7 @@ need the following utility functions::
     def unescape_placeholder(string: str) -> str:  # This function will be useful later
         return string.replace("$$", "$")
 
-You can then write this substitution logic in the following way::
+To start on this idea, you can write the described ``feed()`` as follows::
 
     from taglib import format_value
 
@@ -569,7 +560,7 @@ You can then write this substitution logic in the following way::
                 case getvalue, _, conv, spec:
                     # feed the placeholder to the parser
                     super().feed(PLACEHOLDER)
-                    # apply any value formatting
+                    # apply value formatting (if any)
                     value = format_value(getvalue(), conv, spec) if conv or spec else getvalue()
                     # store the value for later use in the handler methods
                     self.values.append(value)
@@ -679,7 +670,7 @@ You can handle each of these scenarios with the code below::
 
 The last thing to deal with in ``handle_starttag`` is to construct the actual
 ``HtmlNode`` and add it to the ``stack``. This can be copied from the
-``SimpleHtmlBuilder`` with little modification::
+``HtmlBuilder`` with little modification::
 
         def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
             ...
@@ -691,10 +682,10 @@ The last thing to deal with in ``handle_starttag`` is to construct the actual
 
 At this point, you should have written the following ``handle_starttag`` method::
 
-    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        tag, self.values = join_with_values(tag, self.values)
+        def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+            tag, self.values = join_with_values(tag, self.values)
 
-        node_attrs = {}
+            node_attrs = {}
             for k, v in attrs:
                 if v is not None:
                     # Handle attribute name interpolation.
@@ -719,12 +710,11 @@ At this point, you should have written the following ``handle_starttag`` method:
             last_node.children.append(this_node)
             self.stack.append(this_node)
 
+.. TODO: finish tutorial on handle_data and handle_endtag
+
 .. _HTML components:
 
-HTML components
-...............
-
-TODO: show how you can expand html tag to allow for HTML components
+.. TODO: show how you can expand html tag to allow for HTML components
 
 
 `fl` tag - lazy interpolation of f-strings
