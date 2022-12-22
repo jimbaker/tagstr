@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from typing import *
-from types import GeneratorType
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from html import escape
 from html.parser import HTMLParser
@@ -12,7 +12,7 @@ from taglib import decode_raw, Thunk, format_value
 def demo():
     color = "blue"
     attrs = {"style": {"font-size": "bold", "font-family": "mono"}}
-    dom = html"<a **{attrs} color=dark{color} >{html'<h{i}/>' for i in range(1, 4)}</a>"
+    dom = html"<_ {attrs} color=dark{color} >{html'<h{i}/>' for i in range(1, 4)}</>"
     print(dom.render(indent=2))
     print(repr(dom))
 
@@ -55,6 +55,8 @@ class HtmlNode:
         children_list: list[str] = []
         for item in self.children:
             match item:
+                case "":
+                    pass
                 case str():
                     item = escape(item, quote=False)
                 case HtmlNode():
@@ -119,17 +121,17 @@ class HtmlNodeParser(HTMLParser):
 
         node_attrs = {}
         for k, v in attrs:
-            if v is not None:
-                k, self.values = join_with_values(v, self.values)
-                node_attrs[k], self.values = join_with_values(v, self.values)
-            elif k == f"**{PLACEHOLDER}":
-                attribute_expansion, *self.values = self.values
-                if not isinstance(attribute_expansion, dict):
-                    raise TypeError("Expected a dictionary for attribute expension")
-                node_attrs.update(attribute_expansion)
-            else:  # handle boolean attributes
-                k, self.values = join_with_values(v, self.values)
-                node_attrs[k] = True
+            if k == PLACEHOLDER and v is None:
+                expansion_value, *self.values = self.values
+                node_attrs.update(expansion_value)
+            elif PLACEHOLDER in k:
+                raise SyntaxError("Cannot interpolate attribute names")
+            elif v == PLACEHOLDER:
+                interpolated_value, *self.values = self.values
+                node_attrs[k] = interpolated_value
+            else:
+                interpolated_value, self.values = join_with_values(v, self.values)
+                node_attrs[k] = interpolated_value
 
         # At this point all interpolated values should have been consumed.
         assert not self.values, "Did not interpolate all values"
@@ -143,13 +145,15 @@ class HtmlNodeParser(HTMLParser):
         interleaved_children, self.values = interleave_with_values(data, self.values)
         assert not self.values, "Did not interpolate all values"
 
-        children = self.stack[-1].children = []
+        children = self.stack[-1].children
         for child in interleaved_children:
             match child:
-                case list() | tuple() | GeneratorType():
-                    children.extend(child)
                 case "":
                     pass
+                case str():
+                    children.append(child)
+                case Sequence():
+                    children.extend(child)
                 case _:
                     children.append(child)
 
@@ -158,9 +162,10 @@ class HtmlNodeParser(HTMLParser):
 
 
 # We choose this symbol because, after replacing all $ with $$, there is no way for a
-# user to feed a string that would result in {$}. Thus we can reliably split an HTML
-# data string on {$}.
-PLACEHOLDER = "{$}"
+# user to feed a string that would result in x$x. Thus we can reliably split an HTML
+# data string on x$x. We also choose this because, the HTML parse looks for tag names
+# begining with the regex pattern '[a-zA-Z]'.
+PLACEHOLDER = "X$X"
 
 
 def escape_placeholder(string: str) -> str:

@@ -271,13 +271,13 @@ examples of what it you'll be able to do::
     # Attribute expansion
     attributes = {"color": "blue", "style": {"font-weight": "bold"}}
     assert (
-        html"<h1 **{attributes}>Hello, world!</h1>".render()
+        html"<h1 {attributes}>Hello, world!</h1>".render()
         == '<h1 color="blue" style="font-weight:bold">Hello, world!<h1>'
     )
 
     # Recursive construction
     assert (
-        html"<body>{html"<h{i}/>" for i in range(1, 4)}</body>".render()
+        html"<body>{[html"<h{i}/>" for i in range(1, 4)]}</body>".render()
         == "<body><h1></h1><h2></h2><h3></h3></body>"
     )
 
@@ -420,6 +420,8 @@ Which prints::
     Adding element body text: '!'
     Finished creating element: </h1>
 
+.. _Simple HtmlBuilder:
+
 What this shows, is that in order to use ``HTMLParser`` to construct ``HtmlNode``
 objects, you'll need a way to track which element is currently being constructed at any
 point while text is being fed to the parser. This will allow you to append newly created
@@ -441,7 +443,7 @@ what that looks like in practice::
             self.stack = [self.root]
 
         def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-            this_node = HtmlNode(tag, {k: (v or True) for k, v in attrs.items()})
+            this_node = HtmlNode(tag, dict(attrs))
             last_node = self.stack[-1]
             last_node.children.append(this_node)
             self.stack.append(this_node)
@@ -450,13 +452,9 @@ what that looks like in practice::
             self.stack[-1].append(data)
 
         def handle_endtag(self, tag: str) -> None:
-            self.stack.pop()
-
-.. note::
-
-    This implementation includes a minor editorial decision in the handling of boolean
-    HTML attributes. Where ``HTMLParser`` treats the value of such attributes as
-    ``None`` ``HtmlBuilder`` converts them to ``True``.
+            node = self.stack.pop()
+            if node.tag != tag:
+                raise SyntaxError("Start tag {node.tag!r} does not match end tag {tag!r}")
 
 Now, you could use this ``HtmlBuilder`` class in the following way::
 
@@ -521,16 +519,19 @@ corresponding stored value. For example, given the following tag string::
 
     html"<{tag} style={style} color=blue>{greeting}, {name}!</{tag}>"
 
-The ``feed()`` method would substitute each expression with the placeholder ``{$}`` so
+The ``feed()`` method would substitute each expression with the placeholder ``X$X`` so
 that the parser receives the string::
 
-    "<{$} style={$} color=blue>{$}, {$}!</{$}>"
+    "<X$X style=X$X color=blue>X$X, X$X!</X$X>"
 
-The placeholder has been selected to be ``{$}`` so that, after escaping user provided
-string by replacing all ``$`` characters with ``$$``, there is no way for a user to feed
-a string that would result in ``{$}``. Thus we can reliably identify any ``{$}`` passed
-to the parser to be placeholders. To escape and unescape strings in this manner you'll
-need the following utility functions::
+The placeholder has been selected to be ``X$X`` for two reasons. First, the underlying
+machinery of ``HTMLParser`` includes a regex pattern for element tags expects them to
+begin with a letter. Thus, it's necessary for the first character of the placeholder to
+be a letter. Second, after "escaping" user provided strings by replacing all ``$``
+characters with ``$$``, there is no way for a user to feed a string that would result in
+``X$X``. Thus, we can reliably identify any ``X$X`` passed to the parser to be
+placeholders. To escape and unescape strings in this manner it will be useful to have
+the following utility functions::
 
     def escape_placeholder(string: str) -> str:
         return string.replace("$", "$$")
@@ -538,11 +539,13 @@ need the following utility functions::
     def unescape_placeholder(string: str) -> str:  # This function will be useful later
         return string.replace("$$", "$")
 
+.. _HtmlBuilder.feed:
+
 To start on this idea, you can write the described ``feed()`` as follows::
 
     from taglib import format_value
 
-    PLACEHOLDER = "{$}"
+    PLACEHOLDER = "X$X"
 
     class HtmlBuilder(HTMLParser):
 
@@ -590,7 +593,7 @@ Absent the parser, you could apply ``interleave_with_values`` to the following e
     greeting = "Hello"
     name = "Alice"
 
-    substituted_string = "<{$} style={$} color=blue>{$}, {$}!</{$}>"
+    substituted_string = "<X$X style=X$X color=blue>X$X, X$X!</X$X>"
     values = [tag, style, greeting, name, tag]
 
     result, _ = interleave_with_values(substituted_string, value)
@@ -611,7 +614,7 @@ In addition to ``interleave_with_values``, it will be useful to have a
 values instead of returning them as a list. For example, in a case where the tag or
 attribute name/value is partially interpolated you'd want to do::
 
-    string, remainder = join_with_values("some-{$}-value", ["interpolated"])
+    string, remainder = join_with_values("some-X$X-value", ["interpolated"])
     assert string == "some-interpolated-value"
 
 Where ``join_with_values`` is implemented as::
@@ -632,36 +635,103 @@ In this case you can just join the interleaved values together into one string::
             ...
 
 Next you'll need to tackle the ``attrs``. To do this it will be necessary to lay out
-all the ways you anticipate interpolation to occur. For the purposes of this tutorial
-you'll want to treat the following cases::
+all the ways you anticipate interpolation to occur. In general users will need to
+interpolate attribute names and values as well as a dictionary of values. It turns out
+that this can be accomplished if you allow for the following usages::
 
-1. An attribute's name is interpolated: ``<tag {attr}=value />``
-2. An attribute's value is interpolated: ``<tag attr={value} />``
-3. Attribute expansion declared with a special ``**`` syntax: ``<tag **{attributes} />``
-4. A boolean attribute's name is interpolate: ``<tag {attr} />``
+- An attribute value interpolation: ``<tag name={value} />``
+- An attribute expansion: ``<tag {dictionary_of_attributes} />``
 
-You can handle each of these scenarios with the code below::
+Instead of explicitely allowing attribute name interpolation, users can instead use an
+attribute expansion::
+
+    attrs = {f"data-dynamic-{attr}": True}
+    html"<div {attrs} />"
+
+When a user does use an attribute expansion like ``<tag {dictionary_of_attributes} />``
+the ``feed()`` method you implemented `earlier <HtmlBuilder.feed>`_ will cause the
+parser to receive the substituted string ``<tag X$X />``. When the parser triggers
+``handle_startag`` it will pass ``[(PLACEHOLDER, None)]`` to the ``attrs`` parameter. So to
+check if an attribute expansion has been declared you just need to check if an
+attribute's name is equal to the ``PLACEHOLDER`` and its value is ``None``::
 
         def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
             ...
 
             node_attrs = {}
             for k, v in attrs:
-                # standard attribute declaration (e.g. <tag {attr}={value} />)
-                if v is not None:
-                    # 1. Handle attribute name interpolation.
-                    k, self.values = join_with_values(v, self.values)
-                    # 2. Handle attribute value interpolation.
-                    node_attrs[k], self.values = join_with_values(v, self.values)
-                elif k != f"**{PLACEHOLDER}":
-                    # 3. Handle attribute expansion - the user will have directly passed
-                    # a ditionary of attributes so you don't need to do any interpolation.
-                    attribute_expansion, *self.values = self.values
-                    node_attrs.update(attribute_expansion)
+                if k == PLACEHOLDER and v is None:
+                    expansion_value, *self.values = self.values
+                    node_attrs.update(expansion_value)
+
+                # we'll handle the rest shortly
+                ...
+
+            ...
+
+With this done, you can add anotion condition that will disallow interpolation of
+attribute names. Allow you'll need to do is check if the ``PLACEHOLDER`` is present in
+an attribute name::
+
+        def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+            ...
+
+            node_attrs = {}
+            for k, v in attrs:
+                if k == PLACEHOLDER and v is None:
+                    expansion_value, *self.values = self.values
+                    node_attrs.update(expansion_value)
+                elif PLACEHOLDER in k:
+                    raise SyntaxError("Cannot interpolate attribute names")
+
+                # we'll handle the rest shortly
+                ...
+
+            ...
+
+Now, you'll want to handle attribute value interpolation. This can take two forms -
+values can be fully (``name={value}``) or partially (``name=partial{value}``)
+interpolated. In the former case you'll want to preserve the exact value when assigning
+it to ``node_attrs``::
+
+        def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+            ...
+
+            node_attrs = {}
+            for k, v in attrs:
+                if k == PLACEHOLDER and v is None:
+                    expansion_value, *self.values = self.values
+                    node_attrs.update(expansion_value)
+                elif PLACEHOLDER in k:
+                    raise SyntaxError("Cannot interpolate attribute names")
+                elif v == PLACEHOLDER:
+                    interpolated_value, *self.values = self.values
+                    node_attrs[k] = interpolated_value
+
+                # we'll handle the rest shortly
+                ...
+
+            ...
+
+Lastly, to deal with partially interpolated attribute values, you'll want to use
+``join_with_values``::
+
+        def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+            ...
+
+            node_attrs = {}
+            for k, v in attrs:
+                if k == PLACEHOLDER and v is None:
+                    expansion_value, *self.values = self.values
+                    node_attrs.update(expansion_value)
+                elif PLACEHOLDER in k:
+                    raise SyntaxError("Cannot interpolate attribute names")
+                elif v == PLACEHOLDER:
+                    interpolated_value, *self.values = self.values
+                    node_attrs[k] = interpolated_value
                 else:
-                    # 4. Handle boolean attribute name interpolation.
-                    k, self.values = join_with_values(v, self.values)
-                    node_attrs[k] = True
+                    interpolated_value, self.values = join_with_values(v, self.values)
+                    node_attrs[k] = interpolated_value
 
             # At this point all interpolated values should have been consumed.
             assert not self.values, "Did not interpolate all values"
@@ -680,41 +750,76 @@ The last thing to deal with in ``handle_starttag`` is to construct the actual
             last_node.children.append(this_node)
             self.stack.append(this_node)
 
-At this point, you should have written the following ``handle_starttag`` method::
+Great! All that's left to do now is implement ``handle_data`` - ``handle_endtag``. The
+first thing you'll want to do when implementing ``handle_data`` is to use
+``interleave_with_values`` to substitute any placeholders in the ``data`` it received::
 
-        def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-            tag, self.values = join_with_values(tag, self.values)
-
-            node_attrs = {}
-            for k, v in attrs:
-                if v is not None:
-                    # Handle attribute name interpolation.
-                    k, self.values = join_with_values(v, self.values)
-                    # Handle attribute value interpolation.
-                    node_attrs[k], self.values = join_with_values(v, self.values)
-                elif k == f"**{PLACEHOLDER}":
-                    # Handle attribute expansion - no interpolation is necessary since
-                    # the user will have passed a mapping with the attribute values.
-                    attribute_expansion, *self.values = self.values
-                    node_attrs.update(attribute_expansion)
-                else:
-                    # Handle boolean attribute name interpolation.
-                    k, self.values = join_with_values(v, self.values)
-                    node_attrs[k] = True
+        def handle_data(self, data: str) -> None:
+            interleaved_children, self.values = interleave_with_values(data, self.values)
 
             # At this point all interpolated values should have been consumed.
             assert not self.values, "Did not interpolate all values"
 
-            this_node = HtmlNode(node_tag, node_attrs)
-            last_node = self.stack[-1]
-            last_node.children.append(this_node)
-            self.stack.append(this_node)
+            ...
 
-.. TODO: finish tutorial on handle_data and handle_endtag
+At this point you'll need to add the items of ``interleaved_children`` to the children
+of the last ``HtmlNode`` on the ``stack``. You can access the top stack element via
+``self.stack[-1]``. You could simple extend the ``children`` on that node with the
+interleaved ones you just created, but it would be convenient if, similar to attribute
+expansion, child expansion were possible. That is, if the value of an interpolated child
+is a :class:`~collections.abc.Sequence` then each element ought to be appended to the
+children of the ``HtmlNode``. This can be achieved with the code below::
 
-.. _HTML components:
+    def handle_data(self, data: str) -> None:
+            ...
 
-.. TODO: show how you can expand html tag to allow for HTML components
+            children = self.stack[-1].children
+            for child in interleaved_children:
+                match child:
+                    case "":
+                        pass
+                    case str():
+                        # Handle str separately since it's technically a Sequence
+                        children.append(child)
+                    case Sequence():
+                        # Handle sequence of children
+                        children.extend(child)
+                    case _:
+                        # Handle a single child
+                        children.append(child)
+
+Finally, you'll want to make a few minor changes to ``handle_endtag``. Since tags can
+now be interpolated you'll want to deal with that here as well. Additionally it isn't
+especially convenient to interpolate both start and ends tags. For example,
+``<{interpolated_tag}></{interpolated_tag}>`` is quite long and cumberson to write out.
+Instead, it would be easier if users could declare something shorter like
+``<{interpolated_tag}></{...}>``. You can then modify ``handle_endtag`` to allow for
+these cases::
+
+        def handle_endtag(self, tag: str) -> None:
+            node = self.stack.pop()
+
+            if tag == PLACEHOLDER:
+                interp_tag, *self.values = self.values
+            else:
+                interp_tag, self.values = join_with_values(tag, self.values)
+
+            if interp_tag is ...:
+                # handle end tag shorthand
+                return None
+
+            if interp_tag != node.tag:
+                raise SyntaxError("Start tag {node.tag!r} does not match end tag {interp_tag!r}")
+
+With that, you'll have a fully implemented ``html`` tag! You can find the full
+implementaion of ``html`` tag described here in `Appendix B`_. Here are some examples of
+what you're able to do with it::
+
+    name = "Alice"
+    links = ["https://example.com", "https://google.com"]
+    children = [html"<a href={l}>" for l in links]
+    attributes {"style": {"background-color": "blue"}}
+    result = html"<div><h1>Hello, {name}</h1>
 
 
 `fl` tag - lazy interpolation of f-strings
@@ -1062,7 +1167,7 @@ short>`_::
     from html import escape
 
     HtmlChildren = list[str, "HtmlNode"]
-    HtmlAttributes = dict[str, str | bool | dict[str, str]]
+    HtmlAttributes = dict[str, Any]
 
     @dataclass
     class HtmlNode:
@@ -1119,3 +1224,144 @@ short>`_::
             return result
 
         __str__ = render
+
+
+.. _Appendix B:
+
+Appendix B: Basic ``html`` tag implementation
+=============================================
+
+An ``html`` tag implementation::
+
+    from typing import *
+    from collections.abc import Sequence
+    from html.parser import HTMLParser
+
+    from taglib import decode_raw, Thunk, format_value
+
+
+    def html(*args: str | Thunk) -> str:
+        parser = HtmlNodeParser()
+        for arg in decode_raw(*args):
+            parser.feed(arg)
+        return parser.result()
+
+
+    class HtmlNodeParser(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.root = HtmlNode()
+            self.stack = [self.root]
+            self.values: list[Any] = []
+
+        def feed(self, data: str | Thunk) -> None:
+            match data:
+                case str():
+                    super().feed(escape_placeholder(data))
+                case getvalue, _, conv, spec:
+                    value = getvalue()
+                    self.values.append(
+                        format_value(value, conv, spec) if (conv or spec) else value
+                    )
+                    super().feed(PLACEHOLDER)
+
+        def result(self) -> HtmlNode:
+            root = self.root
+            self.close()
+            match root.children:
+                case []:
+                    raise ValueError("Nothing to return")
+                case [child]:
+                    return child
+                case _:
+                    return self.root
+
+        def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+            tag, self.values = join_with_values(tag, self.values)
+
+            node_attrs = {}
+            for k, v in attrs:
+                if k == PLACEHOLDER and v is None:
+                    expansion_value, *self.values = self.values
+                    node_attrs.update(expansion_value)
+                elif PLACEHOLDER in k:
+                    raise SyntaxError("Cannot interpolate attribute names")
+                elif v == PLACEHOLDER:
+                    interpolated_value, *self.values = self.values
+                    node_attrs[k] = interpolated_value
+                else:
+                    interpolated_value, self.values = join_with_values(v, self.values)
+                    node_attrs[k] = interpolated_value
+
+            # At this point all interpolated values should have been consumed.
+            assert not self.values, "Did not interpolate all values"
+
+            this_node = HtmlNode(tag, node_attrs)
+            last_node = self.stack[-1]
+            last_node.children.append(this_node)
+            self.stack.append(this_node)
+
+        def handle_data(self, data: str) -> None:
+            interleaved_children, self.values = interleave_with_values(data, self.values)
+
+            # At this point all interpolated values should have been consumed.
+            assert not self.values, "Did not interpolate all values"
+
+            children = self.stack[-1].children
+            for child in interleaved_children:
+                match child:
+                    case "":
+                        pass
+                    case str():
+                        children.append(child)
+                    case Sequence():
+                        children.extend(child)
+                    case _:
+                        children.append(child)
+
+        def handle_endtag(self, tag: str) -> None:
+            node = self.stack.pop()
+
+            if tag == PLACEHOLDER:
+                interp_tag, *self.values = self.values
+            else:
+                interp_tag, self.values = join_with_values(tag, self.values)
+
+            if interp_tag is ...:
+                # handle end tag shorthand
+                return None
+
+            if interp_tag != node.tag:
+                raise SyntaxError("Start tag {node.tag!r} does not match end tag {interp_tag!r}")
+
+
+    PLACEHOLDER = "X$X"
+
+
+    def escape_placeholder(string: str) -> str:
+        return string.replace("$", "$$")
+
+
+    def unescape_placeholder(string: str) -> str:
+        return string.replace("$$", "$")
+
+
+    def join_with_values(string: str, values: list[Any]) -> tuple[str, list[Any]]:
+        interleaved_values, remaining_values = interleave_with_values(string, values)
+        return "".join(map(str, interleaved_values)), remaining_values
+
+
+    def interleave_with_values(
+        string: str, values: list[Any]
+    ) -> tuple[list[str | Any], list[Any]]:
+        *string_parts, last_string_part = string.split(PLACEHOLDER)
+        remaining_values = values[len(string_parts) :]
+
+        interleaved_values = [
+            item
+            for s, v in zip(string_parts, values)
+            for item in (unescape_placeholder(s), v)
+        ]
+        interleaved_values.append(last_string_part)
+
+        return interleaved_values, remaining_values
