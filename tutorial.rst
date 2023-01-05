@@ -260,6 +260,8 @@ needs that come with rendering HTML, like expanding dynamic attributes, aren't s
 out of the box. More broadly, Jinja templates make it difficult to coordinate business
 and UI logic since markup in the template is kept separate from your logic in Python.
 
+.. _Intro HTML Tag Examples:
+
 Thankfully though, string tags provide an opportunity to develop a syntax specifically
 designed to make declaring elaborate HTML documents easier. In the tutorial to follow,
 you'll learn how to create an ``html`` tag which can do just this. Specifically, the
@@ -271,13 +273,13 @@ examples of what it you'll be able to do::
     # Attribute expansion
     attributes = {"color": "blue", "style": {"font-weight": "bold"}}
     assert (
-        html"<h1 {attributes}>Hello, world!</h1>".render()
+        str(html"<h1 {attributes}>Hello, world!</h1>")
         == '<h1 color="blue" style="font-weight:bold">Hello, world!<h1>'
     )
 
     # Recursive construction
     assert (
-        html"<body>{[html"<h{i}/>" for i in range(1, 4)]}</body>".render()
+        str(html"<body>{[html"<h{i}/>" for i in range(1, 4)]}</body>")
         == "<body><h1></h1><h2></h2><h3></h3></body>"
     )
 
@@ -289,7 +291,7 @@ representation of the HTML that can be freely manipulated - a Document Object Mo
     node: HtmlNode = html"<h1/>"
     node.attributes["color"] = "blue"
     node.children.append("Hello, world!")
-    assert node.render() == '<h1 color="blue">Hello, world!</h1>'
+    assert str(node) == '<h1 color="blue">Hello, world!</h1>'
 
 .. _HtmlNode short:
 
@@ -305,7 +307,7 @@ Where ``HtmlNode`` is defined as::
         attributes: HtmlAttributes
         children: HtmlChildren
 
-        def render(self) -> str:
+        def __str__(self) -> str:
             ...
 
 .. note::
@@ -353,17 +355,18 @@ and trigger them later::
     button = html"<button onclick={handle_onclick} />"
     button, handlers = load_event_handlers(button)
 
-    assert button.render() == f'<button data-handle-onclick="{handle_onclick_id}" />'
+    assert str(button) == f'<button data-handle-onclick="{handle_onclick_id}" />'
     assert handlers == {handle_onclick_id: handle_onclick}
 
 
 Writing an ``html`` tag
-.......................
+^^^^^^^^^^^^^^^^^^^^^^^
 
 In contrast to the ``sh`` tag, which did not need to do any parsing, the ``html`` tag
-must parse the HTML it receives since, in order to perform attribute expansions and
-recursive construction it needs to know the semantic meaning of values it will
-interpolate. Over the course of this tutorial, you'll learn how to:
+must parse the HTML it receives. This is because the tag must know the semantic meaning
+of values it will interpolate, in order to perform attribute expansions and recursive
+construction as described `earlier <Intro HTML Tag Examples>`_. Over the course of this
+tutorial, you'll learn how to:
 
 - `(1) <A simple HTML builder>`_ Implement a simple HTML builder that converts strings
   into a tree of ``HtmlNode`` objects.
@@ -484,7 +487,7 @@ can add a ``result()`` method::
 .. note::
 
     "Untagged" nodes, like the ``root``, whose ``tag`` attribute is an empty string,
-    will ultimately be stripped from HTML strings produced by ``HtmlNode.render()``.
+    will ultimately be stripped from HTML strings produced by ``HtmlNode.__str__()``.
 
 With this convenience method you can now do::
 
@@ -519,33 +522,37 @@ corresponding stored value. For example, given the following tag string::
 
     html"<{tag} style={style} color=blue>{greeting}, {name}!</{tag}>"
 
-The ``feed()`` method would substitute each expression with the placeholder ``X$X`` so
+The ``feed()`` method would substitute each expression with the placeholder ``x$x`` so
 that the parser receives the string::
 
-    "<X$X style=X$X color=blue>X$X, X$X!</X$X>"
+    "<x$x style=x$x color=blue>x$x, x$x!</x$x>"
 
-The placeholder has been selected to be ``X$X`` for two reasons. First, the underlying
-machinery of ``HTMLParser`` includes a regex pattern for element tags expects them to
-begin with a letter. Thus, it's necessary for the first character of the placeholder to
-be a letter. Second, after "escaping" user provided strings by replacing all ``$``
-characters with ``$$``, there is no way for a user to feed a string that would result in
-``X$X``. Thus, we can reliably identify any ``X$X`` passed to the parser to be
-placeholders. To escape and unescape strings in this manner it will be useful to have
-the following utility functions::
+The placeholder has been selected to be ``x$x`` because:
+
+- The underlying machinery of ``HTMLParser`` includes a regex pattern for element tags
+  that expects them to begin with a letter. Thus, in order to allow element tags to be
+  interpolated, it's necessary for the first character of the placeholder to conform to
+  this requirement. In our case, we just happen to have chose it to be ``x``.
+- Second, after "escaping" user provided strings by replacing all ``$`` characters with
+  ``$$``, there is no way for a user to feed a string that would result in ``x$x``.
+  Thus, we can reliably identify any ``x$x`` passed to the parser to be placeholders.
+
+To escape and unescape strings in this manner it will be useful to have the following
+utility functions::
 
     def escape_placeholder(string: str) -> str:
         return string.replace("$", "$$")
 
-    def unescape_placeholder(string: str) -> str:  # This function will be useful later
+    def unescape_placeholder(string: str) -> str:
         return string.replace("$$", "$")
 
 .. _HtmlBuilder.feed:
 
-To start on this idea, you can write the described ``feed()`` as follows::
+Given all of this, you can write the ``feed()`` method as follows::
 
     from taglib import format_value
 
-    PLACEHOLDER = "X$X"
+    PLACEHOLDER = "x$x"
 
     class HtmlBuilder(HTMLParser):
 
@@ -573,7 +580,10 @@ corresponding expression value when implementing ``handle_starttag`` and
 ``handle_data``. The easiest way to do this is to split the substituted string on the
 placeholder and zip the split string back together with the expression values::
 
-    def interleave_with_values(string: str, values: list[Any]) -> tuple[list[str | Any], list[Any]]:
+    def interleave_with_values(string: str, values: list[Any]) -> tuple[list[Any], list[Any]]:
+        if string == PLACEHOLDER:
+            return values[:1], values[1:]
+
         *string_parts, last_string_part = string.split(PLACEHOLDER)
         remaining_values = values[len(string_parts) :]
 
@@ -593,7 +603,7 @@ Absent the parser, you could apply ``interleave_with_values`` to the following e
     greeting = "Hello"
     name = "Alice"
 
-    substituted_string = "<X$X style=X$X color=blue>X$X, X$X!</X$X>"
+    substituted_string = "<x$x style=x$x color=blue>x$x, x$x!</x$x>"
     values = [tag, style, greeting, name, tag]
 
     result, _ = interleave_with_values(substituted_string, value)
@@ -614,14 +624,18 @@ In addition to ``interleave_with_values``, it will be useful to have a
 values instead of returning them as a list. For example, in a case where the tag or
 attribute name/value is partially interpolated you'd want to do::
 
-    string, remainder = join_with_values("some-X$X-value", ["interpolated"])
-    assert string == "some-interpolated-value"
+    joined, remainder = join_with_values("some-x$x-value", ["interpolated"])
+    assert joined == "some-interpolated-value"
 
 Where ``join_with_values`` is implemented as::
 
-    def join_with_values(string: str, values: list[Any]) -> tuple[str, list[Any]]:
+    def join_with_values(string: str, values: list[Any]) -> tuple[Any, list[Any]]:
         interleaved_values, remaining_values = interleave_with_values(string, values)
-        return "".join(map(str, interleaved_values)), remaining_values
+        match interleaved_values:
+            case [value]:
+                return value, remaining_values
+            case values:
+                return "".join(map(str, values)), remaining_values
 
 Now that ``interleave_with_values`` and ``join_with_values`` have been implemented,
 you'll be able to write the remaining parser methods starting with ``handle_starttag``.
@@ -650,7 +664,7 @@ attribute expansion::
 
 When a user does use an attribute expansion like ``<tag {dictionary_of_attributes} />``
 the ``feed()`` method you implemented `earlier <HtmlBuilder.feed>`_ will cause the
-parser to receive the substituted string ``<tag X$X />``. When the parser triggers
+parser to receive the substituted string ``<tag x$x />``. When the parser triggers
 ``handle_startag`` it will pass ``[(PLACEHOLDER, None)]`` to the ``attrs`` parameter. So to
 check if an attribute expansion has been declared you just need to check if an
 attribute's name is equal to the ``PLACEHOLDER`` and its value is ``None``::
@@ -812,14 +826,123 @@ these cases::
                 raise SyntaxError("Start tag {node.tag!r} does not match end tag {interp_tag!r}")
 
 With that, you'll have a fully implemented ``html`` tag! You can find the full
-implementaion of ``html`` tag described here in `Appendix B`_. Here are some examples of
-what you're able to do with it::
+implementaion of the ``html`` tag described here in `Appendix B`_. Here are some
+examples of what you're able to do with it::
 
-    name = "Alice"
-    links = ["https://example.com", "https://google.com"]
-    children = [html"<a href={l}>" for l in links]
-    attributes {"style": {"background-color": "blue"}}
-    result = html"<div><h1>Hello, {name}</h1>
+    title_level = 1
+    title_style = {"": ""}
+    body_style = {"": ""}
+
+    paragraphs = {
+        "First Title": (
+            "Lorem ipsum dolor sit amet. Aut voluptatibus earum non facilis mollitia "
+            "sed rerum eaque sed dolore tempore. Sit ducimus cupiditate sit accusamus."
+        ),
+        "Second Title": (
+            "Ut corporis nemo in consequuntur galisum aut modi sunt a quasi deleniti "
+            "voluptatem esse eos sint fuga sed totam omnis. Ut tenetur necessitatibus. "
+            "autem officiis sit laboriosam veritatis ad doloremque facere vel."
+        )
+    }
+
+    html_paragraphs = [
+        html"""
+            <div>
+                <h{title_level} { {"style": title_style} }>{title}</{...}>
+                <p { {"style": body_style} }>{body}</p>
+            <div>
+        """
+        for title, body in paragraphs.items()
+    ]
+
+    result = html"<div>{html_paragraphs}</div>"
+    print(result)
+
+Which prints::
+
+    <div>
+    <h1 style="color:blue">First Title</h1>
+    <p style="color:red">Lorem ipsum dolor sit amet. Aut voluptatibus earum non facilis mollitia.</p>
+    <h1 style="color:blue">Second Title</h1>
+    <p style="color:red">Ut corporis nemo in consequuntur galisum aut modi sunt a quasi deleniti.</p>
+    </div>
+
+.. _HTML components:
+
+Now that you have a working ``html`` tag, you can imagine users of this tag developing
+increasingly complicated code for constructing HTML documents. At some point they'll
+want to factor their code into reusable functions. Imagine that a user has define three
+functions that apply styling for the ``header``, ``sidebar``, and ``body`` of a page.
+The usage of these functions look similar to::
+
+    def header(*children: HtmlNode) -> HtmlNode: ...
+    def sidebar(*children: HtmlNode) -> HtmlNode: ...
+    def body(*children: HtmlNode) -> HtmlNode: ...
+
+    document = html"""
+    <div>
+        {header(html'<a href="/home">Home</a>', html'<a href="/about">About</a>', username="Bob")}
+        {sidebar(html'<a href="#section1">Section 1</a>', html'<a href="#section2">Section 2</a>', expanded=True)}
+        {body(html'<p>Lorem ipsum dolor sit amet</p>', html'<p>Consectetur adipiscing elit nam porta.</p>`)
+    <div>
+    """
+
+This looks a bit messy though. The recursive ``html`` tags are hard to read and the fact
+that interplated expressions substitutions cannot span multiple lines means that passing
+more children to any of the functions would cause the line length to get painfully long.
+What if you could extend the ``html`` tag to allow the ``document`` to have been
+declared in the following way instead::
+
+    document = html"""
+    <div>
+        <{header} username="Bob">
+            <a href="/home">Home</a>
+            <a href="/about">About</a>
+        </{header}>
+        <{sidebar} expanded>
+            <a href="#section1">Section 1</a>
+            <a href="#section2">Section 2</a>
+        </{sidebar}>
+        <{body}>
+            <p>Lorem ipsum dolor sit amet</p>
+            <p>Consectetur adipiscing elit nam porta.</p>
+        </{body}>
+    <div>
+    """
+
+Where, if a function is used as the tag of an element, the element's children will be
+passed as positional arguments, and its attributes, keyword arguments of that function.
+The function should then be expected to return an ``HtmlNode``. Conveniently, it turns
+out that enabling this usage doesn't even require a change to the ``html`` tag. Instead,
+you need to add a ``render()`` method to the ``HtmlNode`` class which will recursively
+expand any nodes with a callable ``HtmlNode.tag``::
+
+    @dataclass
+    class HtmlNode:
+        tag: str | Callable[..., HtmlNode]
+        ...
+
+        def render(self) -> HtmlNode:
+            if callable(self.tag):
+                return self.tag(*self.children, **self.attributes).render()
+            else:
+                return HtmlNode(
+                    self.tag,
+                    self.attributes,
+                    [c.render() if isinstance(c, HtmlNode) else c for c in self.children],
+                )
+
+Then, all that's left is to update ``HtmlNode.__str__`` to use ``Html.render`` before
+constructing the string representation. This will then make the string representation
+display the expanded view with the result of all the called ``Html.tag`` functions::
+
+    @dataclass
+    class HtmlNode:
+        ...
+
+        def __str__(self) -> str:
+            self = self.render()
+            ...
 
 
 `fl` tag - lazy interpolation of f-strings
@@ -1165,18 +1288,29 @@ short>`_::
 
     from dataclasses import dataclass, field
     from html import escape
+    from textwrap import dedent
 
     HtmlChildren = list[str, "HtmlNode"]
     HtmlAttributes = dict[str, Any]
 
     @dataclass
     class HtmlNode:
-        tag: str = field(default_factory=str)
+        tag: str | Callable[..., HtmlNode] = ""
         attributes: HtmlAttributes = field(default_factory=dict)
         children: HtmlChildren = field(default_factory=list)
 
-        def render(self, *, indent: int = 0, depth: int = 0) -> str:
-            tab = " " * indent * depth
+        def render(self) -> HtmlNode:
+            if callable(self.tag):
+                return self.tag(*self.children, **self.attributes).render()
+            else:
+                return HtmlNode(
+                    self.tag,
+                    self.attributes,
+                    [c.render() if isinstance(c, HtmlNode) else c for c in self.children],
+                )
+
+        def __str__(self) -> str:
+            node = self.render()
 
             attribute_list: list[str] = []
             for key, value in self.attributes.items():
@@ -1196,17 +1330,15 @@ short>`_::
             children_list: list[str] = []
             for item in self.children:
                 match item:
+                    case "":
+                        pass
                     case str():
                         item = escape(item, quote=False)
                     case HtmlNode():
-                        item = item.render(indent=indent, depth=depth + 1)
+                        item = str(item)
                     case _:
                         item = str(item)
                 children_list.append(item)
-
-            if indent:
-                assert indent > 0
-                children_list = [f"\n{tab}{child}" for child in children_list]
 
             body = "".join(children_list)
 
@@ -1216,14 +1348,9 @@ short>`_::
                 result = body
             else:
                 attr_body = "".join(attribute_list)
-                if body:
-                    result = f"{tab}<{self.tag}{attr_body}>{body}\n{tab}</{self.tag}>"
-                else:
-                    result = f"{tab}<{self.tag}{attr_body}>{body}</{self.tag}>"
+                result = f"<{self.tag}{attr_body}>{body}</{self.tag}>"
 
-            return result
-
-        __str__ = render
+            return dedent(result)
 
 
 .. _Appendix B:
@@ -1335,7 +1462,7 @@ An ``html`` tag implementation::
                 raise SyntaxError("Start tag {node.tag!r} does not match end tag {interp_tag!r}")
 
 
-    PLACEHOLDER = "X$X"
+    PLACEHOLDER = "x$x"
 
 
     def escape_placeholder(string: str) -> str:
@@ -1346,14 +1473,19 @@ An ``html`` tag implementation::
         return string.replace("$$", "$")
 
 
-    def join_with_values(string: str, values: list[Any]) -> tuple[str, list[Any]]:
+    def join_with_values(string: str, values: list[Any]) -> tuple[Any, list[Any]]:
         interleaved_values, remaining_values = interleave_with_values(string, values)
-        return "".join(map(str, interleaved_values)), remaining_values
+        match interleaved_values:
+            case [value]:
+                return value, remaining_values
+            case _:
+                return "".join(map(str, interleaved_values)), remaining_values
 
 
-    def interleave_with_values(
-        string: str, values: list[Any]
-    ) -> tuple[list[str | Any], list[Any]]:
+    def interleave_with_values(string: str, values: list[Any]) -> tuple[list[Any], list[Any]]:
+        if string == PLACEHOLDER:
+            return values[:1], values[1:]
+
         *string_parts, last_string_part = string.split(PLACEHOLDER)
         remaining_values = values[len(string_parts) :]
 

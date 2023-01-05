@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import *
+from textwrap import dedent
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from html import escape
@@ -10,11 +11,28 @@ from taglib import decode_raw, Thunk, format_value
 
 
 def demo():
-    color = "blue"
-    attrs = {"style": {"font-size": "bold", "font-family": "mono"}}
-    dom = html"<_ {attrs} color=dark{color} >{html'<h{i}/>' for i in range(1, 4)}</>"
-    print(dom.render(indent=2))
-    print(repr(dom))
+    title_level = 1
+    title_style = {"color": "blue"}
+    body_style = {"color": "red"}
+
+    paragraphs = {
+        "First Title": "Lorem ipsum dolor sit amet. Aut voluptatibus earum non facilis mollitia.",
+        "Second Title": "Ut corporis nemo in consequuntur galisum aut modi sunt a quasi deleniti.",
+    }
+
+    html_paragraphs = [
+        html"""
+            <h{title_level} { {"style": title_style} }>{title}</{...}>
+            <p { {"style": body_style} }>{body}</p>
+        """
+        for title, body in paragraphs.items()
+    ]
+
+    def simple_wrapper(*children):
+        return html'<div class="simple-wrapper">{children}</div>'
+
+    result = html"<{simple_wrapper}>{html_paragraphs}</{simple_wrapper}>"
+    print(result)
 
 
 def html(*args: str | Thunk) -> str:
@@ -25,20 +43,30 @@ def html(*args: str | Thunk) -> str:
 
 
 HtmlChildren = list[str, "HtmlNode"]
-HtmlAttributes = dict[str, str | bool | dict[str, str]]
+HtmlAttributes = dict[str, Any]
 
 
 @dataclass
 class HtmlNode:
-    tag: str = ""
+    tag: str | Callable[..., HtmlNode] = ""
     attributes: HtmlAttributes = field(default_factory=dict)
     children: HtmlChildren = field(default_factory=list)
 
-    def render(self, *, indent: int = 0, depth: int = 0) -> str:
-        tab = " " * indent * depth
+    def render(self) -> HtmlNode:
+        if callable(self.tag):
+            return self.tag(*self.children, **self.attributes).render()
+        else:
+            return HtmlNode(
+                self.tag,
+                self.attributes,
+                [c.render() if isinstance(c, HtmlNode) else c for c in self.children],
+            )
+
+    def __str__(self) -> str:
+        node = self.render()
 
         attribute_list: list[str] = []
-        for key, value in self.attributes.items():
+        for key, value in node.attributes.items():
             match key, value:
                 case _, True:
                     attribute_list.append(f" {key}")
@@ -53,38 +81,29 @@ class HtmlNode:
                     attribute_list.append(f' {key}="{escape(str(value))}"')
 
         children_list: list[str] = []
-        for item in self.children:
+        for item in node.children:
             match item:
                 case "":
                     pass
                 case str():
                     item = escape(item, quote=False)
                 case HtmlNode():
-                    item = item.render(indent=indent, depth=depth + 1)
+                    item = str(item)
                 case _:
                     item = str(item)
             children_list.append(item)
 
-        if indent:
-            assert indent > 0
-            children_list = [f"\n{tab}{child}" for child in children_list]
-
         body = "".join(children_list)
 
-        if not self.tag:
-            if self.attributes:
+        if not node.tag:
+            if node.attributes:
                 raise ValueError("Untagged node cannot have attributes.")
             result = body
         else:
             attr_body = "".join(attribute_list)
-            if body:
-                result = f"{tab}<{self.tag}{attr_body}>{body}\n{tab}</{self.tag}>"
-            else:
-                result = f"{tab}<{self.tag}{attr_body}>{body}</{self.tag}>"
+            result = f"<{node.tag}{attr_body}>{body}</{node.tag}>"
 
-        return result
-
-    __str__ = render
+        return dedent(result)
 
 
 class HtmlNodeParser(HTMLParser):
@@ -143,6 +162,8 @@ class HtmlNodeParser(HTMLParser):
 
     def handle_data(self, data: str) -> None:
         interleaved_children, self.values = interleave_with_values(data, self.values)
+
+        # At this point all interpolated values should have been consumed.
         assert not self.values, "Did not interpolate all values"
 
         children = self.stack[-1].children
@@ -158,14 +179,32 @@ class HtmlNodeParser(HTMLParser):
                     children.append(child)
 
     def handle_endtag(self, tag: str) -> None:
-        self.stack.pop()
+        node = self.stack.pop()
+
+        if tag == PLACEHOLDER:
+            interp_tag, *self.values = self.values
+        else:
+            interp_tag, self.values = join_with_values(tag, self.values)
+
+        # At this point all interpolated values should have been consumed.
+        assert not self.values, "Did not interpolate all values"
+
+        if interp_tag is ...:
+            # handle end tag shorthand
+            return None
+
+        if interp_tag != node.tag:
+
+            raise SyntaxError(
+                "Start tag {node.tag!r} does not match end tag {interp_tag!r}"
+            )
 
 
 # We choose this symbol because, after replacing all $ with $$, there is no way for a
 # user to feed a string that would result in x$x. Thus we can reliably split an HTML
 # data string on x$x. We also choose this because, the HTML parse looks for tag names
 # begining with the regex pattern '[a-zA-Z]'.
-PLACEHOLDER = "X$X"
+PLACEHOLDER = "x$x"
 
 
 def escape_placeholder(string: str) -> str:
@@ -178,12 +217,19 @@ def unescape_placeholder(string: str) -> str:
 
 def join_with_values(string: str, values: list[Any]) -> tuple[str, list[Any]]:
     interleaved_values, remaining_values = interleave_with_values(string, values)
-    return "".join(map(str, interleaved_values)), remaining_values
+    match interleaved_values:
+        case [value]:
+            return value, remaining_values
+        case values:
+            return "".join(map(str, values)), remaining_values
 
 
 def interleave_with_values(
     string: str, values: list[Any]
-) -> tuple[list[str | Any], list[Any]]:
+) -> tuple[list[Any], list[Any]]:
+    if string == PLACEHOLDER:
+        return values[:1], values[1:]
+
     *string_parts, last_string_part = string.split(PLACEHOLDER)
     remaining_values = values[len(string_parts) :]
 
