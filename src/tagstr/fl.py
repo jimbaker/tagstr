@@ -5,7 +5,8 @@ from dataclasses import dataclass
 from functools import cached_property
 from typing import *
 
-from taglib import decode_raw, format_value, Thunk
+from tagstr.taglib import decode_raw, format_value
+from tagstr import Thunk
 
 
 def just_like_f_string(*args: str | Thunk) -> str:

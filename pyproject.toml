@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=61.0.0", "wheel", "pytest", "sphinx"]
+requires = ["setuptools>=61.0.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,3 +7,7 @@ name = "tagstr"
 version = "0.0.1"
 description = "Collection of tag string demos, docs, and specs."
 requires-python = ">=3.12"
+dependencies = ["pytest", "sphinx-book-theme", "lutra", "pytest-sphinx", "sphinx-autobuild"]
+
+[tool.pytest.ini_options]
+addopts = "-ra -q --doctest-modules --ignore=examples"
