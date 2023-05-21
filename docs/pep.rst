@@ -9,22 +9,6 @@ such as safety checks, lazy evaluation, DSLs such as web templating, and more.
 Tag strings are similar to `JavaScript tagged templates <https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Template_literals#tagged_templates>`_
 and similar ideas in other languages.
 
-Relationship with Other PEPs
-============================
-
-Python introduced f-strings in Python 3.6 with :pep:`498`. The grammar was
-then formalized in :pep:`701` which also lifted some restrictions. This PEP
-is based off of PEP 701.
-
-At nearly the same time PEP 498 arrived, :pep:`501` was written to provide
-"i-strings" -- that is, "interpolation template strings". The PEP was
-deferred pending further experience with f-strings. Work on this PEP was
-resumed by a different author in Mar 2023, introducing "t-strings" as template
-literal strings, and built atop PEP 701.
-
-The authors of this PEP consider tag strings as a generalization of the
-updated work in PEP 501.
-
 Motivation
 ==========
 
@@ -54,13 +38,6 @@ example: SQL injection attacks, also known as the
 `Bobby Tables problem <https://xkcd.com/327/>`_.
 
 Interception unsafe interpolations, in fact, was the primary motivation for :pep:501.
-
-Transformations
----------------
-
-Interpolations might want some very simple transformations. For example,
-`flufl.i18n <https://flufli18n.readthedocs.io/en/stable/using.html#substitutions-and-placeholders>`_
-has a simple underscore function which can do static and dynamic substitutions.
 
 Web Templating and DSLs
 -----------------------
@@ -507,6 +484,22 @@ Examples
 ========
 
 - Link to longer examples in the repo
+
+Relationship with Other PEPs
+============================
+
+Python introduced f-strings in Python 3.6 with :pep:`498`. The grammar was
+then formalized in :pep:`701` which also lifted some restrictions. This PEP
+is based off of PEP 701.
+
+At nearly the same time PEP 498 arrived, :pep:`501` was written to provide
+"i-strings" -- that is, "interpolation template strings". The PEP was
+deferred pending further experience with f-strings. Work on this PEP was
+resumed by a different author in Mar 2023, introducing "t-strings" as template
+literal strings, and built atop PEP 701.
+
+The authors of this PEP consider tag strings as a generalization of the
+updated work in PEP 501.
 
 Reference Implementation
 ========================
