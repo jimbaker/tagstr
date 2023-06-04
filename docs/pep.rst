@@ -304,9 +304,8 @@ These attributes are as follows:
 * ``getvalue`` is the lambda-wrapped expression of the interpolation, ``lambda:
   name``.
 
-* ``raw`` is the **expression text** of the interpolation, ``'name'``. An
-  alternative name could be ``text``, and this could be better (these are not
-  the same as raw strings with the ``r`` prefix).
+* ``raw`` is the *expression text* of the interpolation, ``'name'``. Note that
+  an alternative and possibly better name for this attribute could be ``text``.
 
 * ``conv`` is the optional conversion used, one of ``r``, ``s``, and ``a``,
    corresponding to repr, str, and ascii conversions. Note that as with
@@ -315,6 +314,8 @@ These attributes are as follows:
 * ``formatspec`` is the optional formatspec. A formatspec is eagerly evaluated
    if it contains any expressions before being passed to the tag function. The
    interpretation of the ``formatspec`` is according to the tag function.
+
+FIXME decide if ``raw`` or ``text`` is a better attribute name.
 
 In the CPython reference implementation, implementing ``Thunk`` in C would
 use the equivalent `Struct Sequence Objects
