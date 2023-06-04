@@ -159,7 +159,7 @@ processed the interpolation into a form useful for your tag function. Thunks
 are fully described below in ``Specification``. TODO proper rst link
 
 Here is a more generalized version using structural pattern matching and
-type hints::
+type hints:
 
 .. code-block:: python
 
@@ -179,6 +179,7 @@ type hints::
     greeting = greet"Hello {name} nice to meet you"
     assert greeting == "Hello WORLD nice to meet you!"
 
+TODO:
 - An example that shows conversion and format information
 - Show a lazy implementation
 - Follow ideas in other languages, especially JS
@@ -224,8 +225,6 @@ PEP 701
 Tag strings support the full syntax of :pep:`701` in that any string literal,
 with any quote mark, can be nested in the interpolation. This nesting includes
 of course tag strings.
-
-
 
 Evaluating tag strings
 ----------------------
@@ -302,15 +301,20 @@ the following pure-Python semantics:
 
 These attributes are as follows:
 
-* ``getvalue`` is the lambda-wrapped expression of the interpolation, ``lambda: name``.
+* ``getvalue`` is the lambda-wrapped expression of the interpolation, ``lambda:
+  name``.
+
 * ``raw`` is the **expression text** of the interpolation, ``'name'``. An
   alternative name could be ``text``, and this could be better (these are not
   the same as raw strings with the ``r`` prefix).
+
 * ``conv`` is the optional conversion used, one of ``r``, ``s``, and ``a``,
    corresponding to repr, str, and ascii conversions. Note that as with
-   f-strings no other conversions are supported.
+   f-strings, no other conversions are supported.
+
 * ``formatspec`` is the optional formatspec. A formatspec is eagerly evaluated
-   if it contains any expressions before being passed to the tag function.
+   if it contains any expressions before being passed to the tag function. The
+   interpretation of the ``formatspec`` is according to the tag function.
 
 In the CPython reference implementation, implementing ``Thunk`` in C would
 use the equivalent `Struct Sequence Objects
