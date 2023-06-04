@@ -366,6 +366,7 @@ Tag function arguments
 The tag function has the following signature:
 
 .. code-block:: python
+
     def mytag(*args: Chunk | Thunk) -> Any:
         ...
 
