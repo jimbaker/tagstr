@@ -271,7 +271,7 @@ non-obvious, the tag function will be be called with ``Chunk`` for any string
 chunks. ``Chunk`` is-a ``str``, but has an additional property, ``cooked`` that
 provides this decoding.  The ``Chunk`` type will be available from ``typing``.
 In CPython, ``Chunk`` will be implemented in C, but it has this pure Python
-equivalent::
+equivalent:
 
 .. code-block:: python
     class Chunk(str):
@@ -291,37 +291,14 @@ equivalent::
                 self._cooked = self.encode('utf-8').decode('unicode-escape')
             return self._cooked
 
-.. note::
-
-    This approach of cooked vs raw is somewhat similar to what is done in tagged
-    template literals in JavaScript, although its convention is that strings are
-    by default cooked, with ``raw`` available as an attribute.
-
-    However, the decoder for ``unicode-escape``, as of 3.6, returns a
-    ``DeprecationWarning``, if the escapes are not valid for a Python literal
-    string; https://docs.python.org/dev/whatsnew/3.6.html#deprecated-python-behavior
-
-    Additionally if the string is not raw, as of 3.12, this becomes a
-    ``SyntaxWarning`` if it's source text; see
-    https://github.com/python/cpython/issues/98401
-
-    A simple example to show this would be ``r'\.py'`` vs ``'\.py'``; the first
-    usage would often be used with the ``re`` embedded DSL, but it's not a
-    permissible non-raw Python string literal, given that ``\.`` is not a valid
-    escape in Python source itself.
-
-    Given these caveats, providing a raw string by default ensures that no
-    unnecessary warnings are emitted. In addition, it's possible to
-    annotate a tag to indicate to an IDE that the source text should be treated
-    as raw or cooked.
-
 Thunk
 -----
 
 A thunk is the data structure representing the interpolation information from
 the template. The type ``Thunk`` will be made available from ``typing``, with
-the following pure-Python semantics::
+the following pure-Python semantics:
 
+.. code-block:: python
     from typing import NamedTuple
 
     class Thunk(NamedTuple):
@@ -330,7 +307,7 @@ the following pure-Python semantics::
         conv: str | None = None
         formatspec: str | None = None
 
-These attributes are as follows::
+These attributes are as follows:
 
 * ``getvalue`` is the lambda-wrapped expression of the interpolation, ``lambda: name``.
 * ``raw`` is the **expression text** of the interpolation, ``'name'``. An
@@ -391,13 +368,13 @@ corresponding interpolation in the tag string.
 Tag function arguments
 ----------------------
 
-The tag function has the following signature::
+The tag function has the following signature:
 
 .. code-block:: python
     def mytag(*args: Chunk | Thunk) -> Any:
         ...
 
-This corresponds to the following protocol::
+This corresponds to the following protocol:
 
 .. code-block:: python
     class Tag(Protocol):
@@ -405,7 +382,7 @@ This corresponds to the following protocol::
             ...
 
 Because of subclassing, the signature for ``mytag`` can of course be widened to
-the following, at the cost of losing some type specificity::
+the following, at the cost of losing some type specificity:
 
 .. code-block:: python
     def mytag(*args: str | tuple) -> Any:
@@ -414,7 +391,7 @@ the following, at the cost of losing some type specificity::
 Function application
 --------------------
 
-Tag strings desugar as follows::
+Tag strings desugar as follows:
 
 .. code-block:: python
 
@@ -445,71 +422,61 @@ No empty string chunks
 
 Alternation between string chunks and thunks is commonly seen, but it depends on
 the tag string, because string chunks will never have a value that is the empty
-string. For example::
+string. For example:
 
 .. code-block:: python
     mytag'{a}{b}{c}'
 
-results in::
+results in:
 
 .. code-block:: python
     mytag(Thunk(lambda: a, 'a'), Thunk(lambda: b, 'b'), Thunk(lambda: c, 'c'))
 
-Likewise::
+Likewise
 
 .. code-block:: python
     mytag''
 
-results in this evaluation::
+results in this evaluation:
 
 .. code-block:: python
     mytag()
 
-Round-tripping limitations for ``conv`` and ``formatspec``
-----------------------------------------------------------
-
-There are two limitations with respect to exactly round-tripping to the original
-source text.
-
-First, the ``formatspec`` can be arbitrarily nested:
-
-.. code-block:: python
-
-    mytag'{x:{a{b{c}}}}'
-
-In this PEP and corresponding reference implementation, the formatspec
-is eagerly evaluated to set the ``formatspec`` in the thunk, thereby losing the
-original expressions.
-
-Secondly, ``mytag'{expr=}'`` is parsed to being the same as
-``mytag'expr={expr}``', as implemented in the issue `Add = to f-strings for
-easier debugging <https://github.com/python/cpython/issues/80998>`_.
-
-While it would be feasible to preserve round-tripping in every usage, this would
-require an extra flag ``equals`` to support, for example, ``{x=}``, and a
-recursive ``Thunk`` definition for ``formatspec``. The following is roughly the
-pure Python equivalent of this type, including preserving the sequence
-unpacking (as used in case statements):
-
-.. code-block:: python
-
-    class Thunk(NamedTuple):
-        getvalue: Callable[[], Any]
-        raw: str
-        conv: str | None = None
-        formatspec: str | None | tuple[str | Thunk, ...] = None
-        equals: bool = False
-
-        def __len__(self):
-            return 4
-
-        def __iter__(self):
-            return iter((self.getvalue, self.raw, self.conv, self.formatspec))
-
-However, this additional complexity seems unnecessary and is thus rejected.
 
 Tool Support
 ============
+
+Annotating tag functions
+------------------------
+
+Tag functions can be annotated in a number of ways, such as to support an IDE or
+a linter for the underlying DSL. For example:
+
+.. code-block:: python
+    from dataclasses import dataclass, field
+    from typing import Chunk, Thunk
+
+    @dataclass
+    class Language:
+        mimetype: str  # standard language name
+        raw: bool  # whether the string will be used as-is (raw) or cooked by decoding
+
+    HtmlChildren = list[str, 'HtmlNode']
+    HtmlAttributes = dict[str, Any]
+
+    @dataclass
+    class HtmlNode:
+        tag: str | Callable[..., HtmlNode] = ''
+        attributes: HtmlAttributes = field(default_factory=dict)
+        children: HtmlChildren = field(default_factory=list)
+    ...
+
+    type HTML = Annotated[T, Language(mimetype='text/html', raw=False)]
+
+    def html(*args: Chunk | Thunk) -> HTML[HtmlNode]:
+        # process any chunks as cooked strings
+        ...
+
 
 Backwards Compatibility
 =======================
@@ -538,17 +505,13 @@ How To Teach This
 Common patterns seen in writing tag functions
 =============================================
 
-Recursive construction
-----------------------
-
-Some type of marker class
-
 Structural pattern matching
 ---------------------------
 
 Iterating over the arguments with structural pattern matching is the expected
-best practice for many tag function implementations::
+best practice for many tag function implementations:
 
+.. code-block:: python
     def tag(*args: str | Thunk) -> Any:
         for arg in args:
             match arg:
@@ -557,22 +520,25 @@ best practice for many tag function implementations::
                 case getvalue, raw, conv, format:
                     ... # handle each interpolation
 
-This can then be nested, to support recursive construction::
+Recursive construction
+----------------------
 
-    TODO
+FIXME Describe the use of a marker class
 
 Memoizing parses
 -----------------
 
-Consider this tag string::
+Consider this tag string:
 
-    html"<li {attrs}>Some todo: {todo}</li>"
+.. code-block:: python
+    html'<li {attrs}>Some todo: {todo}</li>''
 
 Regardless of the expressions ``attrs`` and ``todo``, we would expect that the
 static part of the tag string should be parsed the same. So it is possible to
 memoize the parse only on the strings ``'<li> ''``, ``''>Some todo: ''``,
-``'</li>''``::
+``'</li>''``:
 
+.. code-block:: python
     def memoization_key(*args: str | Thunk) -> tuple[str...]:
         return tuple(arg for arg in args if isinstance(arg, str))
 
@@ -587,6 +553,7 @@ Such tag functions can memoize as follows:
 TODO need to actually write this - there's an example of how to do this for
 writing an ``html`` tag in the companion tutorial PEP.
 
+
 Examples
 ========
 
@@ -597,6 +564,79 @@ Reference Implementation
 
 Rejected Ideas
 ==============
+
+Cooked string chunks by default
+-------------------------------
+
+This approach of cooked vs raw is somewhat similar to what is done in tagged
+template literals in JavaScript, although its convention is that strings are
+by default cooked, with ``raw`` available as an attribute.
+
+However, the decoder for ``unicode-escape``, as of 3.6, returns a
+``DeprecationWarning``, if the escapes are not valid for a Python literal
+string; https://docs.python.org/dev/whatsnew/3.6.html#deprecated-python-behavior
+
+Additionally if the string is not raw, as of 3.12, this becomes a
+``SyntaxWarning`` if it's source text; see
+https://github.com/python/cpython/issues/98401
+
+A simple example to show this would be ``r'\.py'`` vs ``'\.py'``; the first
+usage would often be used with the ``re`` embedded DSL, but it's not a
+permissible non-raw Python string literal, given that ``\.`` is not a valid
+escape in Python source itself.
+
+Given these caveats, providing a cooked string by default is rejected, to avoid
+emitting unnecessary warnings.
+
+In addition, it's possible to
+annotate a tag to indicate to an IDE that the source text should be treated
+as raw or cooked.
+
+Cached values for ``getvalue``
+------------------------------
+
+Enable exact round-tripping of ``conv`` and ``formatspec``
+----------------------------------------------------------
+
+There are two limitations with respect to exactly round-tripping to the original
+source text.
+
+First, the ``formatspec`` can be arbitrarily nested:
+
+.. code-block:: python
+    mytag'{x:{a{b{c}}}}'
+
+In this PEP and corresponding reference implementation, the formatspec
+is eagerly evaluated to set the ``formatspec`` in the thunk, thereby losing the
+original expressions.
+
+Secondly, ``mytag'{expr=}'`` is parsed to being the same as
+``mytag'expr={expr}``', as implemented in the issue `Add = to f-strings for
+easier debugging <https://github.com/python/cpython/issues/80998>`_.
+
+While it would be feasible to preserve round-tripping in every usage, this would
+require an extra flag ``equals`` to support, for example, ``{x=}``, and a
+recursive ``Thunk`` definition for ``formatspec``. The following is roughly the
+pure Python equivalent of this type, including preserving the sequence
+unpacking (as used in case statements):
+
+.. code-block:: python
+    class Thunk(NamedTuple):
+        getvalue: Callable[[], Any]
+        raw: str
+        conv: str | None = None
+        formatspec: str | None | tuple[str | Thunk, ...] = None
+        equals: bool = False
+
+        def __len__(self):
+            return 4
+
+        def __iter__(self):
+            return iter((self.getvalue, self.raw, self.conv, self.formatspec))
+
+However, the additional complexity to support exact round-tripping seems
+unnecessary and is thus rejected.
+
 
 Acknowledgements
 ================
