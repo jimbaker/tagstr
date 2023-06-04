@@ -83,8 +83,8 @@ Returning to the current templating approach has some downsides:
 - Unable to use common Python tooling (linting, formatting, typing)
 
 Templating is a subset of general support for working with domain-specific
-languages (DSLs). With this PEP, regular Python f-string semantics can be
-passed to another function for postprocessing into new, specific semantics.
+languages (DSLs). With this PEP, regular Python f-string semantics can be passed
+to another function for postprocessing into new, DSL-specific semantics.
 
 As DSLs become an alternative to templating, the combination can be powerful.
 For example, Markdown and reStructured Text "files" can be a combination of
@@ -231,7 +231,7 @@ Evaluating tag strings
 
 When the tag string is evaluated, the tag must have a binding, or a `NameError`
 is raised; and it must be a callable, or a `TypeError` is raised. This behavior
-follows from the translation of
+follows from the desugaring of
 
 .. code-block:: python
 
@@ -285,8 +285,15 @@ equivalent:
 Thunk
 -----
 
-A thunk is the data structure representing the interpolation information from
-the template. The type ``Thunk`` will be made available from ``typing``, with
+A thunk is the data structure representing the interpolation from the tag
+string. Thunks enable a delayed evaluation model, where the interpolation
+expression is computed as needed (if at all); this computation can even be
+memoized by the tag function.
+
+In addition, the text of the interpolation expression is made available to the
+tag function. This can be useful for debugging or metaprogramming.
+
+The type ``Thunk`` will be made available from ``typing``, with
 the following pure-Python semantics:
 
 .. code-block:: python
@@ -295,27 +302,35 @@ the following pure-Python semantics:
 
     class Thunk(NamedTuple):
         getvalue: Callable[[], Any]
-        raw: str
-        conv: str | None = None
+        expr: str
+        conv: Literal['a', 'r', 's'] | None = None
         formatspec: str | None = None
 
-These attributes are as follows:
+Given this example interpolation
 
-* ``getvalue`` is the lambda-wrapped expression of the interpolation, ``lambda:
-  name``.
+.. code-block:: python
 
-* ``raw`` is the *expression text* of the interpolation, ``'name'``. Note that
-  an alternative and possibly better name for this attribute could be ``text``.
+    mytag'{trade!r:some-formatspec}'
 
-* ``conv`` is the optional conversion used, one of ``r``, ``s``, and ``a``,
-   corresponding to repr, str, and ascii conversions. Note that as with
-   f-strings, no other conversions are supported.
+these attributes are as follows:
 
-* ``formatspec`` is the optional formatspec. A formatspec is eagerly evaluated
-   if it contains any expressions before being passed to the tag function. The
-   interpretation of the ``formatspec`` is according to the tag function.
+* ``getvalue`` is the lambda-wrapped expression for the interpolation. Example:
+  ``lambda: trade``. (Lambda wrapping results in a zero-arg function.)
 
-FIXME decide if ``raw`` or ``text`` is a better attribute name.
+* ``expr`` is the *expression text* of the interpolation. Example: ``'trade'``.
+  (The lambda wrapping is implied.)
+
+* ``conv`` is the optional conversion to be used by the tag function, one of
+  ``r``, ``s``, and ``a``, corresponding to repr, str, and ascii conversions.
+  Note that as with f-strings, no other conversions are supported. Example:
+  ``'r'``.
+
+* ``formatspec`` is the optional formatspec string. A formatspec is eagerly
+  evaluated if it contains any expressions before being passed to the tag
+  function. Example: ``'some-formatspec'``.
+
+In all cases, the tag function determines how to work with the ``Thunk``
+attributes.
 
 In the CPython reference implementation, implementing ``Thunk`` in C would
 use the equivalent `Struct Sequence Objects
@@ -401,11 +416,11 @@ is equivalent to
 
     mytag('Hi, ', (lambda: name, 'name', None, None), '!')
 
-Tag names are part of the same namespace
-----------------------------------------
+Tag function names are in the same namespace
+--------------------------------------------
 
-Because tag functions are simply callables on a sequence of strings and thunks,
-it is possible to write code like the following:
+Because tag functions are simply callables on a sequence of string chunks and
+thunks, it is possible to write code like the following:
 
 .. code-block:: python
 
@@ -427,7 +442,7 @@ string. For example:
 
     mytag'{a}{b}{c}'
 
-results in:
+results in this desugaring:
 
 .. code-block:: python
 
@@ -439,7 +454,7 @@ Likewise
 
     mytag''
 
-results in this evaluation:
+results in this desugaring:
 
 .. code-block:: python
 
@@ -453,17 +468,35 @@ Annotating tag functions
 ------------------------
 
 Tag functions can be annotated in a number of ways, such as to support an IDE or
-a linter for the underlying DSL. For example:
+a linter for the underlying DSL. For example, both PyCharm and VSCode have specific support
+for embedding DSLs:
+
+* PyCharm call this `language injections
+  <https://www.jetbrains.com/help/pycharm/using-language-injections.html>`_.
+
+* VScode calls this `embedded languages
+  <https://code.visualstudio.com/api/language-extensions/embedded-languages>`_.
+
+GitHub also uses a `registry of known languages
+<https://github.com/github-linguist/linguist/blob/master/lib/linguist/languages.yml>`_,
+as part of its Linguist project, which could be potentially leveraged.
+
+ For example, let's define a convention for defining an embedded DSL with
+ respect to Linguist. We will use function annotations introduced by :pep:`593`:
 
 .. code-block:: python
 
-    from dataclasses import dataclass, field
-    from typing import Chunk, Thunk
-
     @dataclass
     class Language:
-        mimetype: str  # standard language name
-        raw: bool  # whether the string will be used as-is (raw) or cooked by decoding
+        linguist: str  # standard language name/alias known to GitHub's Linguist
+        cooked: bool = True
+
+    type HTML = Annotated[T, Language(linguist='HTML')]
+
+This can then be put together with a DOM class for HTML (this comes from one of
+the tag string examples):
+
+.. code-block:: python
 
     HtmlChildren = list[str, 'HtmlNode']
     HtmlAttributes = dict[str, Any]
@@ -473,12 +506,16 @@ a linter for the underlying DSL. For example:
         tag: str | Callable[..., HtmlNode] = ''
         attributes: HtmlAttributes = field(default_factory=dict)
         children: HtmlChildren = field(default_factory=list)
-    ...
+        ...
 
-    type HTML = Annotated[T, Language(mimetype='text/html', raw=False)]
+Then combine together to indicate that the tag function ``html`` works with an
+embedded DSL that supports HTML:
+
+.. code-block:: python
 
     def html(*args: Chunk | Thunk) -> HTML[HtmlNode]:
-        # process any chunks as cooked strings
+        # process any chunks as cooked strings that are HTML fragments,
+        # and should be parsed/linted/highlighted accordingly
         ...
 
 
@@ -673,7 +710,7 @@ complicated and is thus rejected.
 Acknowledgements
 ================
 
-FIXME
+FIXME include contributors to this repo, including commenters on issues
 
 Copyright
 =========
