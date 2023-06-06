@@ -1,10 +1,10 @@
 Abstract
 ========
 
-This PEP introduces tag strings for custom, repeatable string processing.
-Tag strings are an extension to f-strings, with a custom function -- the "tag"
--- in place of the `f` prefix. This function can then provide rich features
-such as safety checks, lazy evaluation, DSLs such as web templating, and more.
+This PEP introduces tag strings for custom, repeatable string processing. Tag strings
+are an extension to f-strings, with a custom function -- the "tag" -- in place of the
+`f` prefix. This function can then provide rich features such as safety checks, lazy
+evaluation, domain specific languages (DSLs) for web templating, and more.
 
 Tag strings are similar to `JavaScript tagged templates <https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Template_literals#tagged_templates>`_
 and similar ideas in other languages.
@@ -28,75 +28,30 @@ updated work in PEP 501.
 Motivation
 ==========
 
-Python f-strings became very popular, very fast. The syntax was easy and
-convenient while the interpolation name references had access to regular
-scoping rules. In short: f-strings feel like Python.
+Python f-strings became very popular, very fast. The syntax was simple, convenient, and
+interpolated expressions had access to regular scoping rules. However, f-strings have
+two main limitations - expressions are eagerly evaluated, and interplolated values
+cannot be intercepted. The former means that f-strings cannot be re-used like templates,
+and the latter means that how values are interpolated cannot be customized.
 
-With years of f-string adoption in place, more can be considered.
+Templating in Python is currently achieved using packages like Jinja2 which bring their
+own templating languages for generating dynamic content. In addition to being one more
+thing to learn, these languages are not nearly as expressive as Python itself is. This
+means that business logic, which cannot be expressed in the templating language, must be
+written in Python instead, spreading the logic across different languages and files.
 
-Eager vs. Lazy
---------------
+Likewise, the inability to intercept interpolated values means that they cannot be
+sanitized or otherwise transformed before being integrated into the final string. Here,
+the convenience of f-strings could be considered a liability. For example, a user
+executing a query with `sqlite3 <https://docs.python.org/3/library/sqlite3.html>`__
+may be tempted to use an f-string to embed values into their SQL expression instead of
+using the ``?`` placeholder and passing the values as a tuple to avoid an
+`SQL injection attack <https://en.wikipedia.org/wiki/SQL_injection>`__.
 
-In Python, fstrings are eagerly evaluated. That is, the interpolations are
-evaluated immediately. This prevents f-string re-use: for example, imported
-from a common module and when logging. Questions regarding this `come up
-frequently <https://stackoverflow.com/questions/71189844/can-i-delay-evaluation-of-the-python-expressions-in-my-f-string>`_.
-
-Unsafe Interpolations
----------------------
-
-Because interpolations are eagerly evaluated, developers can't conveniently
-intercept values to check for unsafe practices.
-
-For example: running a string that executes a line in the shell. Those
-interpolation values should be run through ``shlex.quote``. As a related
-example: SQL injection attacks, also known as the
-`Bobby Tables problem <https://xkcd.com/327/>`_.
-
-Intercepting unsafe interpolations, in fact, was the primary motivation for :pep:`501`.
-
-Transformations
----------------
-
-Interpolations might want some very simple transformations. For example,
-`flufl.i18n <https://flufli18n.readthedocs.io/en/stable/using.html#substitutions-and-placeholders>`_
-has a simple underscore function which can do static and dynamic substitutions.
-
-Web Templating and DSLs
------------------------
-
-Python has a long history with web templating, with many popular packages,
-most prominently `Jinja2 <https://pypi.org/project/Jinja2/>`_. Some might
-prefer a more Pythonic approach, such as f-strings, but these are missing
-many features common for HTML templating:
-
-- Sanitized strings
-- Rich support for HTML attributes
-- Sub-templates such as macros, components, and layouts
-- Helpers such as piping into filters
-- Innovate new ideas such as virtual DOMs
-
-Returning to the current templating approach has some downsides:
-
-- Non-Pythonic syntax
-- Alternative scoping rules and syntax for sharing/importing
-- Unable to use common Python tooling (linting, formatting, typing)
-
-Templating is a subset of general support for working with domain-specific
-languages (DSLs). With this PEP, regular Python f-string semantics can be passed
-to another function for postprocessing into new, DSL-specific semantics.
-
-As DSLs become an alternative to templating, the combination can be powerful.
-For example, Markdown and reStructured Text "files" can be a combination of
-text, processing, and interpolation logic. This idea is popularized in the
-`MDX project <https://mdxjs.com>`_.
-
-Extra Processing
-----------------
-
-When functions can be combined with strings and interpolation, the door opens
-for custom and innovative extra processing. As an example, memoization and
-transparent caching.
+Tag strings address both these problems by extending the f-string syntax to provide
+developers access to the string and its interpolated values before they are combined. In
+doing so, tag strings may be interpreted in many different ways, opening up the
+possibility for DSLs and other custom string processing.
 
 Proposal
 ========
