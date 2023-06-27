@@ -16,10 +16,10 @@ $ path/to/venv/bin/pip install -e .
 
 # Examples
 
-- [Shell](https://github.com/jimbaker/tagstr/blob/main/examples/shell.py)
-- [SQL](https://github.com/jimbaker/tagstr/blob/main/examples/sql.py)
-- [HTML](https://github.com/jimbaker/tagstr/blob/main/examples/htmldom.py)
-- [Among others...](https://github.com/jimbaker/tagstr/blob/main/examples)
+- [Shell](https://github.com/jimbaker/tagstr/blob/main/src/tagstr/shell.py)
+- [SQL](https://github.com/jimbaker/tagstr/blob/main/src/tagstr/sql.py)
+- [HTML](https://github.com/jimbaker/tagstr/blob/main/src/tagstr/htmldom.py)
+- [Among others...](https://github.com/jimbaker/tagstr/blob/main/src/tagstr)
 
 # Related Work
 
