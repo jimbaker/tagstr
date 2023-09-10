@@ -43,12 +43,12 @@ def i(*args: str | Thunk) -> InterpolationTemplate:
             case str():
                 raw_template.append(raw_arg)
                 last_str_arg = arg
-            case getvalue, raw, conv, formatspec:
+            case getvalue, raw, conv, format_spec:
                 value = getvalue()
-                raw_template.append(f"{{{raw}{'!' + conv if conv else ''}{':' + formatspec if formatspec else ''}}}")
+                raw_template.append(f"{{{raw}{'!' + conv if conv else ''}{':' + format_spec if format_spec else ''}}}")
                 parsed_template.append((last_str_arg, raw))
                 field_values.append(value)
-                format_specifiers.append('' if formatspec is None else formatspec)
+                format_specifiers.append('' if format_spec is None else format_spec)
                 last_str_arg = ''
     if last_str_arg:
         parsed_template.append((last_str_arg, None))

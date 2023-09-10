@@ -262,13 +262,13 @@ the following pure-Python semantics:
         getvalue: Callable[[], Any]
         expr: str
         conv: Literal['a', 'r', 's'] | None = None
-        formatspec: str | None = None
+        format_spec: str | None = None
 
 Given this example interpolation:
 
 .. code-block:: python
 
-    mytag'{trade!r:some-formatspec}'
+    mytag'{trade!r:some-format_spec}'
 
 these attributes are as follows:
 
@@ -284,9 +284,10 @@ these attributes are as follows:
   and ascii conversions. Note that as with f-strings, no other conversions are supported.
   Example: ``'r'``.
 
-* ``formatspec`` is the optional formatspec string. A formatspec is eagerly
-  evaluated if it contains any expressions before being passed to the tag
-  function. Example: ``'some-formatspec'``.
+* ``format_spec`` is the
+  `optional format specification <https://docs.python.org/3/library/string.html#format-string-syntax>`_.
+  A format_spec is eagerly evaluated if it contains any expressions before being passed to the
+  tag function. Example: ``'some-format-spec'``.
 
 In all cases, the tag function determines how to work with the ``Thunk``
 attributes.
@@ -330,7 +331,7 @@ conversion in a thunk. For example, this is a valid usage:
 
     html'<div id={id:int}>{content:HTMLNode|str}</div>'
 
-In this case the formatspec for the second thunk is the string
+In this case the format_spec for the second thunk is the string
 ``'HTMLNode|str'``; it is up to the ``html`` tag to do something with the
 "format spec" here, if anything.
 
@@ -517,7 +518,7 @@ best practice for many tag function implementations:
             match arg:
                 case str():
                     ... # handle each string chunk
-                case getvalue, expr, conv, formatspec:
+                case getvalue, expr, conv, format_spec:
                     ... # handle each interpolation
 
 Recursive Construction
@@ -601,20 +602,20 @@ Cached Values For ``getvalue``
 
 FIXME
 
-Enable Exact Round-Tripping of ``conv`` and ``formatspec``
+Enable Exact Round-Tripping of ``conv`` and ``format_spec``
 ----------------------------------------------------------
 
 There are two limitations with respect to exactly round-tripping to the original
 source text.
 
-First, the ``formatspec`` can be arbitrarily nested:
+First, the ``format_spec`` can be arbitrarily nested:
 
 .. code-block:: python
 
     mytag'{x:{a{b{c}}}}'
 
-In this PEP and corresponding reference implementation, the formatspec
-is eagerly evaluated to set the ``formatspec`` in the thunk, thereby losing the
+In this PEP and corresponding reference implementation, the format_spec
+is eagerly evaluated to set the ``format_spec`` in the thunk, thereby losing the
 original expressions.
 
 Secondly, ``mytag'{expr=}'`` is parsed to being the same as
@@ -623,7 +624,7 @@ easier debugging <https://github.com/python/cpython/issues/80998>`_.
 
 While it would be feasible to preserve round-tripping in every usage, this would
 require an extra flag ``equals`` to support, for example, ``{x=}``, and a
-recursive ``Thunk`` definition for ``formatspec``. The following is roughly the
+recursive ``Thunk`` definition for ``format_spec``. The following is roughly the
 pure Python equivalent of this type, including preserving the sequence
 unpacking (as used in case statements):
 
@@ -633,14 +634,14 @@ unpacking (as used in case statements):
         getvalue: Callable[[], Any]
         raw: str
         conv: str | None = None
-        formatspec: str | None | tuple[str | Thunk, ...] = None
+        format_spec: str | None | tuple[str | Thunk, ...] = None
         equals: bool = False
 
         def __len__(self):
             return 4
 
         def __iter__(self):
-            return iter((self.getvalue, self.raw, self.conv, self.formatspec))
+            return iter((self.getvalue, self.raw, self.conv, self.format_spec))
 
 However, the additional complexity to support exact round-tripping seems
 unnecessary and is thus rejected.
