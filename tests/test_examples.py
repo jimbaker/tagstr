@@ -4,7 +4,7 @@ Each test case is a function in an example. These test case functions
 can return either an expected/actual tuple or a sequence of these.
 """
 
-from tagstr.greeting import greet, greet2, greet3, greet4
+from tagstr.greeting import greet, greet2, greet3, greet4, greet5
 
 
 def test_greeting():
@@ -24,6 +24,11 @@ def test_greeting3():
 def test_greeting4():
     name = "World"
     result = greet4"Hello {name!r:s}"
+    expected = "Hello gv: World, r: name, c: r, f: s!"
+    assert expected == result
+def test_greeting5():
+    name = "World"
+    result = greet5"Hello {name!r:s}"
     expected = "Hello gv: World, r: name, c: r, f: s!"
     assert expected == result
 

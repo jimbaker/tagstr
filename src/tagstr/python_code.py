@@ -38,15 +38,15 @@ def code(*args: str | Thunk) -> PythonCode:
                     if m := INITIAL_WHITESPACE_RE.search(line):
                         indent_level = len(m.group(0))
                 text.append(arg)
-            case getvalue, _, _, formatspec:
+            case getvalue, _, _, format_spec:
                 value = getvalue()
                 # The following can be considered to be a creative use (or
-                # abuse) of formatspec. Note that we might want to support use
+                # abuse) of format_spec. Note that we might want to support use
                 # of a lexically scoped var here with the format spec - unlike
                 # params/pretty, this functionality cannot be handled by a
                 # function in the expression, as we see with
                 # code"...{param_list(params)}..."
-                match formatspec:
+                match format_spec:
                     case 'params':
                         text.append(param_list(value))
                     case 'pretty':

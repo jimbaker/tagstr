@@ -103,7 +103,7 @@ A thunk is a tuple with this shape:
 
 .. literalinclude:: ../src/tagstr/__init__.py
     :start-at: class Thunk
-    :end-at: formatspec
+    :end-at: format_spec
 
 Let's add some typing information to our greet function.
 We'll

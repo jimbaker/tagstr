@@ -17,8 +17,8 @@ def re(*args: str | Thunk) -> re_module.Pattern:
         match arg:
             case str():
                 pattern.append(arg)
-            case getvalue, _, _, formatspec:
-                pattern.append(format(getvalue(), '' if formatspec is None else formatspec))
+            case getvalue, _, _, format_spec:
+                pattern.append(format(getvalue(), '' if format_spec is None else format_spec))
 
     return re_module.compile(''.join(pattern), re_module.VERBOSE)
 

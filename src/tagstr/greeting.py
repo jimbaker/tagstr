@@ -41,11 +41,28 @@ def greet4(*args: str | Thunk) -> str:
         match arg:
             case str():
                 result.append(arg)
-            case getvalue, raw, conversion, formatspec:
+            case getvalue, raw, conversion, format_spec:
                 gv = f"gv: {getvalue()}"
                 r = f"r: {raw}"
                 c = f"c: {conversion}"
-                f = f"f: {formatspec}"
+                f = f"f: {format_spec}"
+                result.append(", ".join([gv, r, c, f]))
+
+    return f"{''.join(result)}!"
+
+
+def greet5(*args: str | Thunk) -> str:
+    """Conversion and format_spec."""
+    result = []
+    for arg in args:
+        match arg:
+            case str():
+                result.append(arg)
+            case getvalue, raw, conversion, format_spec:
+                gv = f"gv: {getvalue()}"
+                r = f"r: {raw}"
+                c = f"c: {conversion}"
+                f = f"f: {format_spec}"
                 result.append(", ".join([gv, r, c, f]))
 
     return f"{''.join(result)}!"
