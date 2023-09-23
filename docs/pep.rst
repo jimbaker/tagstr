@@ -63,24 +63,36 @@ the string.
 
 Here's a very simple example. Imagine we want a certain kind of string with
 some custom business policies. For example, uppercase the value and add an
-exclamation point:
+exclamation point.
+
+Let's start with a tag string which simply returns a static greeting:
+
+.. code-block:: python
+
+    def greet():
+        """Give a static greeting."""
+        return "Hello!"
+
+    assert greet"Hello" == "Hello!"  # Use the custom "tag" on the string
+
+As you can see, `greet` is just a callable, in the place that the ``f``
+prefix would go. Let's now use the incoming string and form the greeting:
 
 .. code-block:: python
 
     def greet(*args):
-        """Uppercase and add exclamation"""
+        """Uppercase and add exclamation."""
         salutation = args[0].upper()
         return f"{salutation}!"
 
-    greeting = greet"Hello"  # Use the custom "tag" on the string
-    assert greeting == "HELLO!"
+    name = "World"
+    assert greet"Hello {name}" == "Hello WORLD!"
 
 The beginnings of tag strings appear:
 
-- ``greet"Hello"`` is an f-string, but with a ``greet`` prefix instead of ``f``
-- This ``greet`` prefix is a callable, in this case, the ``greet`` function
-- The function is passed a sequence of values
-- The first value is just a string
+- ``greet"Hello {name}"`` has the syntax of an f-string
+- The ``greet` tag function is passed a sequence of values
+- The first value in `args` is the passed-in string
 - ``greet`` performs a simple operation and returns a string
 
 With this in place, let's introduce an interpolation. That is, a place where
@@ -89,15 +101,17 @@ a value should be inserted:
 .. code-block:: python
 
     def greet(*args):
+        """Handle an interpolation thunk."""
         salutation = args[0].strip()
-        # Second arg is a "thunk" named tuple for the interpolation.
+        # Second arg is a "thunk" tuple for the interpolation.
         getvalue = args[1][0]
         recipient = getvalue().upper()
         return f"{salutation} {recipient}!"
 
     name = "World"
-    greeting = greet"Hello {name}"
-    assert greeting == "Hello WORLD!"
+    result = greet"Hello {name:s} nice to meet you"
+    assert result == "Hello WORLD nice to meet you!"
+
 
 The f-string interpolation of ``{name}`` leads to the new machinery in tag
 strings:
@@ -118,31 +132,56 @@ type hints:
 
 .. code-block:: python
 
-    from typing import Chunk, Thunk
-    def greet(*args: Chunk | Thunk) -> str:
+    def greet(*args):
+        """Handle arbitrary args using structural pattern matching."""
         result = []
         for arg in args:
             match arg:
-                case str():  # A chunk is a string, but can be cooked
-                    result.append(arg.cooked)
-                case getvalue, _, _, _: # A thunk is an interpolation
+                case str():  # This is a chunk...just a string
+                    result.append(arg)
+                case getvalue, _, _, _:  # This is a thunk...an interpolation
                     result.append(getvalue().upper())
 
         return f"{''.join(result)}!"
 
-    name = "World"
-    greeting = greet"Hello {name} nice to meet you"
-    assert greeting == "Hello WORLD nice to meet you!"
+        name = "World"
+        assert greet4"Hello {name}" == "Hello WORLD!"
 
-TODO:
-- An example that shows conversion and format information
-- Show a lazy implementation
-- Follow ideas in other languages, especially JS
+Tag strings extract more than just a callable from the "thunk". They also
+provide Python string formatting info:
+
+.. code-block::
+
+    def greet(*args: str | Thunk) -> str:
+        """Thunks can have string formatting specs and conversions."""
+        result = []
+        for arg in args:
+            match arg:
+                case str():
+                    result.append(arg)
+                case getvalue, raw, conversion, format_spec:
+                    gv = f"gv: {getvalue()}"
+                    r = f"r: {raw}"
+                    c = f"c: {conversion}"
+                    f = f"f: {format_spec}"
+                    result.append(", ".join([gv, r, c, f]))
+
+        return f"{''.join(result)}!"
+
+    name = "World"
+    assert greet5"Hello {name!r:s}" == "Hello gv: World, r: name, c: r, f: s!"
+
+You can see the other parts getting extracted:
+
+- The raw string of the interpolation
+- The Python "conversion" field (str, repr, ascii)
+- Any format spec
 
 Specification
 =============
 
-In the rest of this specification, ``mytag`` will be used for an arbitrary tag. Example:
+In the rest of this specification, ``mytag`` will be used for an arbitrary tag.
+For example:
 
 .. code-block:: python
 
@@ -502,6 +541,38 @@ Performance Impact
 How To Teach This
 =================
 
+Tag strings have several audiences: consumers of tag functions, authors of tag
+functions, and framework authors who provide interesting machinery for tag
+functions.
+
+All three groups can start from an important framing:
+
+- Existing solutions (such as template engines) can do parts of tag strings
+- But tag strings move everything closer to "normal Python"
+
+Consumers can look at tag strings as starting from f-strings:
+
+- They look familiar.
+- Scoping and syntax rules are the same.
+- You just need to import the tag function.
+
+They first thing they need to absorb: unlike f-strings, the string isn't
+immediately evaluated "in-place". Something else (the tag function) happens.
+That's the second thing to teach: the tag functions do something particular.
+Thus the concept of "domain specific languages" (DSL.)
+
+Tag function authors therefore think in terms of making a DSL. They have
+business policies they want to provide in a Python-familiar way. With tag
+functions, Python is going to do much of the pre-processing. This lowers
+the bar for making a DSL.
+
+Tag authors can start with simple uses. Tag strings can then open to larger
+patterns: lazy evaluation, intermediate representations, registries, and more.
+
+Finally, framework authors can provide contact points with their lifecycles.
+For example, decorators which tag function authors can use to memoize
+interpolations in the function args.
+
 Common Patterns Seen In Writing Tag Functions
 =============================================
 
@@ -533,7 +604,7 @@ Consider this tag string:
 
 .. code-block:: python
 
-    html'<li {attrs}>Some todo: {todo}</li>''
+    html'<li {attrs}>Some todo: {todo}</li>'
 
 Regardless of the expressions ``attrs`` and ``todo``, we would expect that the
 static part of the tag string should be parsed the same. So it is possible to
@@ -560,7 +631,7 @@ writing an ``html`` tag in the companion tutorial PEP.
 Examples
 ========
 
-- Link to longer examples in the repo
+- TODO Link to longer examples in the repo
 
 Reference Implementation
 ========================
