@@ -8,27 +8,22 @@ from tagstr.greeting import greet, greet2, greet3, greet4, greet5
 
 
 def test_greeting():
-    result = greet"Hello"
-    assert "HELLO!" == result
+    assert greet"Hello" == "Hello!"  # Use the custom "tag" on the string
 
 def test_greeting2():
     name = "World"
-    result = greet2"Hello {name}"
-    assert "Hello WORLD!" == result
+    assert greet2"Hello {name}" == "Hello WORLD!"
 
 def test_greeting3():
     name = "World"
     result = greet3"Hello {name:s} nice to meet you"
-    assert "Hello WORLD nice to meet you!" == result
+    assert result == "Hello WORLD nice to meet you!"
 
 def test_greeting4():
     name = "World"
-    result = greet4"Hello {name!r:s}"
-    expected = "Hello gv: World, r: name, c: r, f: s!"
-    assert expected == result
+    assert greet4"Hello {name}" == "Hello WORLD!"
+
 def test_greeting5():
     name = "World"
-    result = greet5"Hello {name!r:s}"
-    expected = "Hello gv: World, r: name, c: r, f: s!"
-    assert expected == result
+    assert greet5"Hello {name!r:s}" == "Hello gv: World, r: name, c: r, f: s!"
 
