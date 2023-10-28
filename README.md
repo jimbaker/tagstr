@@ -12,7 +12,7 @@ $ path/to/venv/bin/pip install -e .
 
 - [WIP PEP](https://github.com/jimbaker/tagstr/blob/main/docs/pep.rst)
 - [Tutorial](https://github.com/jimbaker/tagstr/blob/main/docs/tutorial.rst)
-- [Implementation (WIP)](https://github.com/gvanrossum/cpython/tree/tag-strings)
+- [Implementation (WIP)](https://github.com/gvanrossum/cpython/tree/tag-strings-v2)
 
 # Examples
 
