@@ -24,7 +24,7 @@ def rewrite_thunk(thunk: Thunk) -> Thunk:
     When the thunk's getvalue is evaluated, returns a dict of name to any bound
     value.
     """
-    getvalue, raw, conv, formatspec = thunk
+    getvalue, raw, conv, format_spec = thunk
     code = getvalue.__code__
     print(f'Compiling thunk {hash(getvalue.__code__)}')
     dis.dis(code)
@@ -50,7 +50,7 @@ def outer({param_list(code.co_freevars)}):
         getvalue.__defaults__, 
         getvalue.__closure__)
 
-    return new_getvalue, wrapped, conv, formatspec
+    return new_getvalue, wrapped, conv, format_spec
 
 
 def rewritten(*args: str | Thunk):

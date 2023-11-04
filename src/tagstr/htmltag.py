@@ -84,7 +84,7 @@ class DomCodeGenerator(HTMLParser):
         #
         #    Call getvalue for the thunk at the i-th position in args.
         #
-        # This interpolation could optionally also process formatspec and
+        # This interpolation could optionally also process format_spec and
         # conversion, if specified.
         print(f'raw data seen in the interpolation: {i=} {self.rawdata!r}')
 
