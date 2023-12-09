@@ -20,3 +20,10 @@ Type "help", "copyright", "credits" or "license" for more information.
 >>> html"Hello, world!"
 '<html>Hello, world!</html>'
 ```
+
+## How to build multi-arch images
+```shell
+$ sudo apt install qemu-user-static # for linux/amd64 host
+$ docker buildx create --use
+$ docker buildx build --platform linux/amd64,linux/arm64 -t tag-string-v2:slim-bookworm slim-bookworm
+```
