@@ -7,4 +7,4 @@ class Thunk(NamedTuple):
     getvalue: Callable[[], Any]
     raw: str
     conv: str | None
-    formatspec: str | None
+    format_spec: str | None
