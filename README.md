@@ -1,27 +1,25 @@
 # Tag strings
 
-An early stage PEP that introduces tag strings - a natural extension of "f-strings" from [PEP 498](https://peps.python.org/pep-0498/) which enables Python developers to create and use their own custom tags (or prefixes) when working with string literals and any interpolation. Tag strings are based on a related idea in JavaScript, [tagged template literals](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Template_literals#tagged_templates) but with a Pythonic syntax for both the use of and the definition of tags.
+This PEP introduces tag strings for custom, repeatable string processing. Tag strings
+are an extension to f-strings, with a custom function -- the "tag" -- in place of the
+`f` prefix. This function can then provide rich features such as safety checks, lazy
+evaluation, domain specific languages (DSLs) for web templating, and more.
 
-# Install
+Tag strings are similar to `JavaScript tagged templates <https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Template_literals#tagged_templates>`_
+and similar ideas in other languages.
 
-```shell
-$ path/to/venv/bin/pip install -e .
-```
+## Examples repo
 
-# Documents
+To keep the conversation here focused on the PEP, we moved supporting material to 
+[a companion repo](https://github.com/pauleveritt/tagstr-site). There you can find 
+resources such as:
 
-- [WIP PEP](https://github.com/jimbaker/tagstr/blob/main/docs/pep.rst)
-- [Tutorial](https://github.com/jimbaker/tagstr/blob/main/docs/tutorial.rst)
-- [Implementation (WIP)](https://github.com/gvanrossum/cpython/tree/tag-strings-v2)
+- JupyterLite playground for tag strings
+- Docker builds
+- Long-form tutorials
+- Example code
 
-# Examples
-
-- [Shell](https://github.com/jimbaker/tagstr/blob/main/src/tagstr/shell.py)
-- [SQL](https://github.com/jimbaker/tagstr/blob/main/src/tagstr/sql.py)
-- [HTML](https://github.com/jimbaker/tagstr/blob/main/src/tagstr/htmldom.py)
-- [Among others...](https://github.com/jimbaker/tagstr/blob/main/src/tagstr)
-
-# Related Work
+## Related Work
 
 - [Flufl i18n substitutions](https://flufli18n.readthedocs.io/en/stable/using.html#substitutions-and-placeholders)
 - [Tagged library](https://github.com/jviide/tagged)
