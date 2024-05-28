@@ -299,9 +299,7 @@ a protocol ``Decoded``:
 
 These ``Decoded`` objects have access to raw strings. Raw strings are used because tag strings
 are meant to target a variety of DSLs, such as the shell and regexes. Such DSLs have their
-own specific treatment of metacharacters, namely the backslash. This approach follows
-the usual convention of using the r-prefix for regexes in Python itself, given that
-regexes are their own DSL.
+own specific treatment of metacharacters, namely the backslash.
 
 However, often the "cooked" string is what is needed, by decoding the string as
 if it were a standard Python string. In the proposed implementation, the decoded object's
