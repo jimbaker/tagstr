@@ -1,13 +1,43 @@
+PEP: 9999
+Title: Tag Strings For Writing Domain-Specific Languages
+Author: Jim Baker <jim.baker@python.org>, Guido van Rossum <guido@python.org>, Paul Everitt <pauleveritt@me.com>
+Status: Draft
+Type: Standards Track
+Content-Type: text/x-rst
+Created: 01-Jun-2024
+Python-Version: 3.13
+
 Abstract
 ========
 
 This PEP introduces tag strings for custom, repeatable string processing. Tag strings
 are an extension to f-strings, with a custom function -- the "tag" -- in place of the
-`f` prefix. This function can then provide rich features such as safety checks, lazy
-evaluation, domain specific languages (DSLs) for web templating, and more.
+``f`` prefix. This function can then provide rich features such as safety checks, lazy
+evaluation, domain-specific languages (DSLs) for web templating, and more.
 
 Tag strings are similar to `JavaScript tagged templates <https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Template_literals#tagged_templates>`_
-and similar ideas in other languages.
+and related ideas in other languages.
+
+Tag functions can be very simple:
+
+.. code-block:: python
+
+    def greet(*args):
+        salutation = args[0].strip()
+        getvalue = args[1][0]
+        recipient = getvalue().upper()
+        return f"{salutation} {recipient}!"
+
+With this, ``greet`` can be used in a way that is familiar to f-strings:
+
+.. code-block:: python
+
+    name = "World"
+    greeting = greet"Hello {name}"
+    assert greeting == "Hello WORLD!"
+
+Below you can find richer examples. As a note, an implementation based on CPython 3.12
+exists, as discussed in this document.
 
 Relationship With Other PEPs
 ============================
@@ -19,7 +49,7 @@ is based off of PEP 701.
 At nearly the same time PEP 498 arrived, :pep:`501` was written to provide
 "i-strings" -- that is, "interpolation template strings". The PEP was
 deferred pending further experience with f-strings. Work on this PEP was
-resumed by a different author in Mar 2023, introducing "t-strings" as template
+resumed by a different author in March 2023, introducing "t-strings" as template
 literal strings, and built atop PEP 701.
 
 The authors of this PEP consider tag strings as a generalization of the
@@ -62,8 +92,7 @@ a callable which is given a sequence of arguments for the parsed tokens in
 the string.
 
 Here's a very simple example. Imagine we want a certain kind of string with
-some custom business policies. For example, uppercase the value and add an
-exclamation point.
+some custom business policies: uppercase the value and add an exclamation point.
 
 Let's start with a tag string which simply returns a static greeting:
 
@@ -75,8 +104,8 @@ Let's start with a tag string which simply returns a static greeting:
 
     assert greet"Hello" == "Hello!"  # Use the custom "tag" on the string
 
-As you can see, `greet` is just a callable, in the place that the ``f``
-prefix would go. Let's now use the incoming string and form the greeting:
+As you can see, ``greet`` is just a callable, in the place that the ``f``
+prefix would go. Let's look at the args:
 
 .. code-block:: python
 
@@ -85,81 +114,85 @@ prefix would go. Let's now use the incoming string and form the greeting:
         salutation = args[0].upper()
         return f"{salutation}!"
 
-    name = "World"
-    assert greet"Hello {name}" == "Hello WORLD!"
+    greeting = greet"Hello"  # Use the custom "tag" on the string
+    assert greeting == "HELLO!"
 
-The beginnings of tag strings appear:
+The tag function is passed a sequence of arguments. Since our tag string is simply
+``"Hello"``, the ``args`` sequence only contains a string-like value of ``'Hello'``.
 
-- ``greet"Hello {name}"`` has the syntax of an f-string
-- The ``greet` tag function is passed a sequence of values
-- The first value in `args` is the passed-in string
-- ``greet`` performs a simple operation and returns a string
-
-With this in place, let's introduce an interpolation. That is, a place where
+With this in place, let's introduce an *interpolation*. That is, a place where
 a value should be inserted:
 
 .. code-block:: python
 
     def greet(*args):
-        """Handle an interpolation thunk."""
+        """Handle an interpolation."""
+        # The first arg is the string-like value "Hello " with a space
         salutation = args[0].strip()
-        # Second arg is a "thunk" tuple for the interpolation.
-        getvalue = args[1][0]
-        recipient = getvalue().upper()
+        # The second arg is an "interpolation"
+        interpolation = args[1]
+        # Interpolations are tuples, the first item is a lambda
+        getvalue = interpolation[0]
+        # It gets called in the scope where it was defined, so
+        # the interpolation returns "World"
+        result = getvalue()
+        recipient = result.upper()
         return f"{salutation} {recipient}!"
 
     name = "World"
-    result = greet"Hello {name:s} nice to meet you"
-    assert result == "Hello WORLD nice to meet you!"
-
+    greeting = greet"Hello {name}"
+    assert greeting == "Hello WORLD!"
 
 The f-string interpolation of ``{name}`` leads to the new machinery in tag
 strings:
 
-- `args[0]` is still the string, this time with a trailing space
-- `args[1]` is an interpolation expression -- the ``{name}`` part
-- Tag strings represent this interpolation part as a *thunk*
-- A thunk is a tuple whose first item is a lambda
-- Calling this lambda evaluates the expression using the usual lexical scoping
+- ``args[0]`` is still the string-like ``'Hello '``, this time with a trailing space
+- ``args[1]`` is an expression -- the ``{name}`` part
+- Tag strings represent this part as an *interpolation* object
+- An interpolation is a tuple whose first item is a lambda
+- Calling this lambda evaluates the expression in the original scope where the tag string was defined
 
-The ``*args`` list is a sequence of "chunks" and "thunks". A chunk is just a
-string. But what is a "thunk"? It's a tuple representing how tag strings
-processed the interpolation into a form useful for your tag function. Thunks
-are fully described below in `Specification`_.
+The ``*args`` list is a sequence of ``Decoded`` and ``Interpolation`` values. A "decoded" object
+is a string-like object with extra powers, as described below. An "interpolation" object is a
+tuple-like value representing how Python processed the interpolation into a form useful for your
+tag function. Both are fully described below in `Specification`_.
 
-Here is a more generalized version using structural pattern matching and
-type hints:
+Here is a more generalized version using structural pattern matching and type hints:
 
 .. code-block:: python
 
-    def greet(*args):
+    from typing import Decoded, Interpolation  # Get the new protocols
+
+    def greet(*args: Decoded | Interpolation) -> str:
         """Handle arbitrary args using structural pattern matching."""
         result = []
         for arg in args:
             match arg:
-                case str():  # This is a chunk...just a string
+                case Decoded() as decoded:
                     result.append(arg)
-                case getvalue, _, _, _:  # This is a thunk...an interpolation
-                    result.append(getvalue().upper())
+                case Interpolation() as interpolation:
+                    value = interpolation.getvalue()
+                    result.append(value.upper())
 
         return f"{''.join(result)}!"
 
-        name = "World"
-        assert greet4"Hello {name}" == "Hello WORLD!"
+    name = "World"
+    greeting = greet"Hello {name} nice to meet you"
+    assert greeting == "Hello WORLD nice to meet you!"
 
-Tag strings extract more than just a callable from the "thunk". They also
-provide Python string formatting info:
+Tag strings extract more than just a callable from the ``Interpolation``. They also
+provide Python string formatting info, as well as the original text:
 
-.. code-block::
+.. code-block:: python
 
-    def greet(*args: str | Thunk) -> str:
-        """Thunks can have string formatting specs and conversions."""
+    def greet(*args: Decoded | Interpolation) -> str:
+        """Interpolations can have string formatting specs and conversions."""
         result = []
         for arg in args:
             match arg:
-                case str():
-                    result.append(arg)
-                case getvalue, raw, conversion, format_spec:
+                case Decoded() as decoded:
+                    result.append(decoded)
+                case getvalue, raw, conversion, format_spec:  # Unpack
                     gv = f"gv: {getvalue()}"
                     r = f"r: {raw}"
                     c = f"c: {conversion}"
@@ -169,13 +202,15 @@ provide Python string formatting info:
         return f"{''.join(result)}!"
 
     name = "World"
-    assert greet5"Hello {name!r:s}" == "Hello gv: World, r: name, c: r, f: s!"
+    assert greet"Hello {name!r:s}" == "Hello gv: World, r: name, c: r, f: s!"
 
-You can see the other parts getting extracted:
+You can see each ``Interpolation`` parts getting extracted:
 
-- The raw string of the interpolation
-- The Python "conversion" field (str, repr, ascii)
-- Any format spec
+- The lambda expression to call and get the value in the scope it was defined
+- The raw string of the interpolation (``name``)
+- The Python "conversion" field (``s``)
+- Any `format specification <https://docs.python.org/3/library/string.html#format-specification-mini-language>`_
+  (``r``)
 
 Specification
 =============
@@ -194,7 +229,7 @@ For example:
 Valid Tag Names
 ---------------
 
-The tag name can be any **undotted** name that isn't already an existing valid
+The tag name can be any *undotted* name that isn't already an existing valid
 string or bytes prefix, as seen in the `lexical analysis specification
 <https://docs.python.org/3/reference/lexical_analysis.html#string-and-bytes-literals>`_,
 Therefore these prefixes can't be used as a tag:
@@ -223,8 +258,8 @@ of course tag strings.
 Evaluating Tag Strings
 ----------------------
 
-When the tag string is evaluated, the tag must have a binding, or a `NameError`
-is raised; and it must be a callable, or a `TypeError` is raised. This behavior
+When the tag string is evaluated, the tag must have a binding, or a ``NameError``
+is raised; and it must be a callable, or a ``TypeError`` is raised. This behavior
 follows from the de-sugaring of:
 
 .. code-block:: python
@@ -232,90 +267,113 @@ follows from the de-sugaring of:
     trade = 'shrubberies'
     mytag'Did you say "{trade}"?'
 
-to
+to:
 
 .. code-block:: python
 
-    mytag(Chunk(r'Did you say "'), Thunk(lambda: trade, 'trade'), Chunk(r'"?'))
+    mytag(DecodedConcrete(r'Did you say "'), InterpolationConcrete(lambda: trade, 'trade'), DecodedConcrete(r'"?'))
 
-String Chunks
--------------
+.. note::
 
-In the earlier example, there are two string chunks, ``r'Did you say "'`` and
-``r'"?'``.
+    `DecodedConcrete` and `InterpolationConcrete` are just example implementations. If approved,
+    tag strings will have concrete types in `builtins`.
 
-String chunks are internally stored as the source raw strings. Raw strings
-are used because tag strings are meant to target a variety of DSLs, such as
-the shell and regexes. Such DSLs have their own specific treatment of
-metacharacters, namely the backslash. (This approach follows the usual
-convention of using the r-prefix for regexes in Python itself, given that
-regexes are their own DSL.)
+Decoded Strings
+---------------
+
+In the ``mytag'Did you say "{trade}"?'`` example, there are two strings: ``r'Did you say "'``
+and ``r'"?'``.
+
+Strings are internally stored as objects with a ``Decoded`` structure, meaning: conforming to
+a protocol ``Decoded``:
+
+.. code-block:: python
+
+    @runtime_checkable
+    class Decoded(Protocol):
+        def __str__(self) -> str:
+            ...
+
+        raw: str
+
+
+These ``Decoded`` objects have access to raw strings. Raw strings are used because tag strings
+are meant to target a variety of DSLs, such as the shell and regexes. Such DSLs have their
+own specific treatment of metacharacters, namely the backslash. This approach follows
+the usual convention of using the r-prefix for regexes in Python itself, given that
+regexes are their own DSL.
 
 However, often the "cooked" string is what is needed, by decoding the string as
-if it were a standard Python string. Because such decoding might be non-obvious,
-the tag function will be be called with ``Chunk`` for any string chunks.
-``Chunk`` *is-a* ``str``, but has an additional property, ``cooked`` that
-provides this decoding.  The ``Chunk`` type will be available from ``typing``.
-In CPython, ``Chunk`` will be implemented in C, but it has this pure Python
-equivalent:
+if it were a standard Python string. In the proposed implementation, the decoded object's
+``__new__`` will *store* the raw string and *store and return* the "cooked" string.
+
+The protocol is marked as ``@runtime_checkable`` to allow structural pattern matching to
+test against the protocol instead of a type. This can incur a small performance penalty.
+Since the ``case`` tests are in user-code tag functions, authors can choose to optimize by
+testing for the implementation type discussed next.
+
+The ``Decoded`` protocol will be available from ``typing``. In CPython, ``Decoded``
+will be implemented in C, but for discussion of this PEP, the following is a compatible
+implementation:
 
 .. code-block:: python
 
-    class Chunk(str):
-        def __new__(cls, value: str) -> Self:
-            chunk = super().__new__(cls, value)
-            chunk._cooked = None
+    class DecodedConcrete(str):
+        _raw: str
+
+        def __new__(cls, raw: str):
+            decoded = raw.encode("utf-8").decode("unicode-escape")
+            if decoded == raw:
+                decoded = raw
+            chunk = super().__new__(cls, decoded)
+            chunk._raw = raw
             return chunk
 
         @property
-        def cooked(self) -> str:
-            """Convert string to bytes then, applying decoding escapes.
+        def raw(self):
+            return self._raw
 
-            Maintain underlying Unicode codepoints. Uses the same internal code
-            path as Python's parser to do the actual decode.
-            """
-            if self._cooked is None:
-                self._cooked = self.encode('utf-8').decode('unicode-escape')
-            return self._cooked
+Interpolation
+-------------
 
-Thunk
------
+An ``Interpolation`` is the data structure representing an expression inside the tag
+string. Interpolations enable a delayed evaluation model, where the interpolation
+expression is computed, transformed, memoized, or processed in any way.
 
-A thunk is the data structure representing the interpolation from the tag
-string. Thunks enable a delayed evaluation model, where the interpolation
-expression is computed as needed (if at all); this computation can even be
-memoized by the tag function.
+In addition, the original text of the interpolation expression is made available to the
+tag function. This can be useful for debugging or metaprogramming.
 
-In addition, the original text of the interpolation expression is made
-available to the tag function. This can be useful for debugging or
-metaprogramming.
-
-The type ``Thunk`` will be made available from ``typing``, with
-the following pure-Python semantics:
+``Interpolation`` is a ``Protocol`` which will be made available from ``typing``. It
+has the following definition:
 
 .. code-block:: python
 
-    from typing import NamedTuple
+    @runtime_checkable
+    class Interpolation(Protocol):
+        def __len__(self):
+            ...
 
-    class Thunk(NamedTuple):
-        getvalue: Callable[[], Any]
+        def __getitem__(self, index: int):
+            ...
+
+        def getvalue(self) -> Callable[[], Any]:
+            ...
+
         expr: str
-        conv: Literal['a', 'r', 's'] | None = None
-        format_spec: str | None = None
+        conv: Literal["a", "r", "s"] | None
+        format_spec: str | None
 
 Given this example interpolation:
 
 .. code-block:: python
 
-    mytag'{trade!r:some-format_spec}'
+    mytag'{trade!r:some-formatspec}'
 
 these attributes are as follows:
 
-* ``getvalue`` is the lambda-wrapped expression for the interpolation. Example:
-  ``lambda: trade``. (Lambda wrapping results in a zero-arg function.)
+* ``getvalue`` is a zero argument closure for the interpolation. In this case, ``lambda: trade``.
 
 * ``expr`` is the *expression text* of the interpolation. Example: ``'trade'``.
-  (The lambda wrapping is implied.)
 
 * ``conv`` is the
   `optional conversion <https://docs.python.org/3/library/string.html#format-string-syntax>`_
@@ -323,24 +381,32 @@ these attributes are as follows:
   and ascii conversions. Note that as with f-strings, no other conversions are supported.
   Example: ``'r'``.
 
-* ``format_spec`` is the
-  `optional format specification <https://docs.python.org/3/library/string.html#format-string-syntax>`_.
-  A format_spec is eagerly evaluated if it contains any expressions before being passed to the
-  tag function. Example: ``'some-format-spec'``.
+* ``format_spec`` is the optional `format_spec string <https://docs.python.org/3/library/string.html#format-specification-mini-language>`_.
+  A format_spec is eagerly evaluated if it contains any expressions before being passed to the tag
+  function. Example: ``'some-formatspec'``.
 
-In all cases, the tag function determines how to work with the ``Thunk``
+In all cases, the tag function determines what to do with valid ``Interpolation``
 attributes.
 
-In the CPython reference implementation, implementing ``Thunk`` in C would
+In the CPython reference implementation, implementing ``Interpolation`` in C would
 use the equivalent `Struct Sequence Objects
 <https://docs.python.org/3/c-api/tuple.html#struct-sequence-objects>`_ (see
 such code as `os.stat_result
-<https://docs.python.org/3/library/os.html#os.stat_result>`_).
+<https://docs.python.org/3/library/os.html#os.stat_result>`_). For purposes of this
+PEP, here is an example of a pure Python implementation:
 
-Thunk Expression Evaluation
----------------------------
+.. code-block:: python
 
-Expression evaluation for thunks is the same as in :pep:`498`, except that all
+    class InterpolationConcrete(NamedTuple):
+        getvalue: Callable[[], Any]
+        expr: str
+        conv: Literal['a', 'r', 's'] | None = None
+        formatspec: str | None = None
+
+Interpolation Expression Evaluation
+-----------------------------------
+
+Expression evaluation for interpolations is the same as in :pep:`498`, except that all
 expressions are always implicitly wrapped with a ``lambda``::
 
     The expressions that are extracted from the string are evaluated in the context
@@ -350,27 +416,25 @@ expressions are always implicitly wrapped with a ``lambda``::
 
 This means that the lambda wrapping here uses the usual lexical scoping. As with
 f-strings, there's no need to use ``locals()``, ``globals()``, or frame
-introspection with ``sys._getframe`` to evaluate the interpolation.
-
-The code of the expression text, ``'trade'``, is available, which means there is
-no need to use ``inspect.getsource``, or otherwise parse the source code to get
-this expression text.
+introspection with ``sys._getframe`` to evaluate the interpolation. Stated differently,
+the code of each expression is available and does not have to be looked up with
+``inspect.getsource`` or some other means.
 
 Format Specification
 --------------------
 
-The format spec is by default ``None`` if it is not specified in the
-tag string's corresponding interpolation.
+The format_spec is by default ``None`` if it is not specified in the tag string's
+corresponding interpolation.
 
-Because the tag function is completely responsible for processing chunks and
-thunks, there is no required interpretation for the format spec and
-conversion in a thunk. For example, this is a valid usage:
+Because the tag function is completely responsible for processing ``Decoded``
+and ``Interpolation`` values, there is no required interpretation for the format
+spec and conversion in an interpolation. For example, this is a valid usage:
 
 .. code-block:: python
 
     html'<div id={id:int}>{content:HTMLNode|str}</div>'
 
-In this case the format_spec for the second thunk is the string
+In this case the format_spec for the second interpolation is the string
 ``'HTMLNode|str'``; it is up to the ``html`` tag to do something with the
 "format spec" here, if anything.
 
@@ -381,15 +445,15 @@ The tag function has the following signature:
 
 .. code-block:: python
 
-    def mytag(*args: Chunk | Thunk) -> Any:
+    def mytag(*args: Decoded | Interpolation) -> Any:
         ...
 
 This corresponds to the following protocol:
 
 .. code-block:: python
 
-    class Tag(Protocol):
-        def __call__(self, *args: Chunk | Thunk) -> Any:
+    class TagFunction(Protocol):
+        def __call__(self, *args: Decoded | Interpolation) -> Any:
             ...
 
 Because of subclassing, the signature for ``mytag`` can of course be widened to
@@ -418,8 +482,8 @@ This is equivalent to:
 Tag Function Names are in the Same Namespace
 --------------------------------------------
 
-Because tag functions are simply callables on a sequence of string chunks and
-thunks, it is possible to write code like the following:
+Because tag functions are simply callables on a sequence of decoded strings and
+interpolations, it is possible to write code like the following:
 
 .. code-block:: python
 
@@ -430,11 +494,11 @@ functions that are named ``f``, but in actual usage they are rarely, if ever,
 mixed up with a f-string. Similar observations can apply to the use of soft
 keywords like ``match`` or ``type``. The same should be true for tag strings.
 
-No Empty String Chunks
-----------------------
+No Empty Decoded String
+-----------------------
 
-Alternation between string chunks and thunks is commonly seen, but it depends on
-the tag string. String chunks will never have a value that is the empty string:
+Alternation between decodeds and interpolations is commonly seen, but it depends
+on the tag string. Decoded strings will never have a value that is the empty string:
 
 .. code-block:: python
 
@@ -444,7 +508,7 @@ the tag string. String chunks will never have a value that is the empty string:
 
 .. code-block:: python
 
-    mytag(Thunk(lambda: a, 'a'), Thunk(lambda: b, 'b'), Thunk(lambda: c, 'c'))
+    mytag(InterpolationConcrete(lambda: a, 'a'), InterpolationConcrete(lambda: b, 'b'), InterpolationConcrete(lambda: c, 'c'))
 
 Likewise:
 
@@ -462,69 +526,37 @@ Likewise:
 Tool Support
 ============
 
-Annotating Tag Functions
-------------------------
+Python Semantics in Tag Strings
+-------------------------------
 
-Tag functions can be annotated in a number of ways, such as to support an IDE or
-a linter for the underlying DSL. For example, both PyCharm and VSCode have specific support
-for embedding DSLs:
+Python template languages and other DSLs have semantics quite apart from Python.
+Different scope rules, different calling semantics e.g. for macros, their own
+grammar for loops, and the like.
 
-* PyCharm calls this `language injections
-  <https://www.jetbrains.com/help/pycharm/using-language-injections.html>`_.
+This means all tools need to write special support for each language. Even then,
+it is usually difficult to find all the possible scopes, for example to autocomplete
+values.
 
-* VScode calls this `embedded languages
-  <https://code.visualstudio.com/api/language-extensions/embedded-languages>`_.
+f-strings of course do not have this issue. An f-string is considered part of Python.
+Expressions in curly braces behave as expected and values should resolve based on
+regular scoping rules. Tools such as ``mypy`` can see inside f-string expressions,
+but will likely never look inside a Jinja2 template.
 
-GitHub also uses a `registry of known languages
-<https://github.com/github-linguist/linguist/blob/master/lib/linguist/languages.yml>`_,
-as part of its Linguist project, which could be potentially leveraged.
-
- For example, let's define a convention for defining an embedded DSL with
- respect to Linguist. We will use function annotations introduced by :pep:`593`:
-
-.. code-block:: python
-
-    @dataclass
-    class Language:
-        linguist: str  # standard language name/alias known to GitHub's Linguist
-        cooked: bool = True
-
-    type HTML = Annotated[T, 'language': 'HTML', 'registry': 'linguist']
-
-This can then be put together with a DOM class for HTML (this comes from one of
-the tag string examples):
-
-.. code-block:: python
-
-    HtmlChildren = list[str, 'HtmlNode']
-    HtmlAttributes = dict[str, Any]
-
-    @dataclass
-    class HtmlNode:
-        tag: str | Callable[..., HtmlNode] = ''
-        attributes: HtmlAttributes = field(default_factory=dict)
-        children: HtmlChildren = field(default_factory=list)
-        ...
-
-Then combine together to indicate that the tag function ``html`` works with an
-embedded DSL that supports HTML:
-
-.. code-block:: python
-
-    def html(*args: Chunk | Thunk) -> HTML[HtmlNode]:
-        # process any chunks as cooked strings that are HTML fragments,
-        # and should be parsed/linted/highlighted accordingly
-        ...
-
+DSLs written with tag strings will inherit much of this value. While we can't expect
+standard tooling to understand the "domain" in the DSL, they can still inspect
+anything expressible in an f-string.
 
 Backwards Compatibility
 =======================
+
+Like f-strings, usage of tag strings will be a syntactic backwards incompatibility
+with previous versions.
 
 Security Implications
 =====================
 
 The security implications of working with interpolations, with respect to
-thunks, are as follows:
+interpolations, are as follows:
 
 1. Scope lookup is the same as f-strings (lexical scope). This model has been
    shown to work well in practice.
@@ -573,6 +605,11 @@ Finally, framework authors can provide contact points with their lifecycles.
 For example, decorators which tag function authors can use to memoize
 interpolations in the function args.
 
+Each of these points also match the teaching of decorators. In that case,
+a learner consumes something which applies to the code just after it. They
+don't need to know too much about decorator theory to take advantage of the
+utility.
+
 Common Patterns Seen In Writing Tag Functions
 =============================================
 
@@ -584,97 +621,55 @@ best practice for many tag function implementations:
 
 .. code-block:: python
 
-    def tag(*args: str | Thunk) -> Any:
+    def tag(*args: Decoded | Interpolation) -> Any:
         for arg in args:
             match arg:
-                case str():
-                    ... # handle each string chunk
-                case getvalue, expr, conv, format_spec:
+                case Decoded() as decoded:
+                    ... # handle each decoded string
+                case Interpolation() as interpolation:
                     ... # handle each interpolation
 
-Recursive Construction
-----------------------
+Lazy Evaluation
+---------------
 
-FIXME Describe the use of a marker class
+The example tag functions above each call the interpolation's `getvalue` lambda
+immediately. Python developers have frequently wished that f-strings could be
+deferred, or lazily evaluated. It would be straightforward to write a wrapper that,
+for example, defers calling the lambda until an ``__str__`` was invoked.
 
-Memoizing Parses
------------------
+Memoizing
+---------
 
-Consider this tag string:
+Tag function authors have control of processing the static string parts and
+the dynamic interpolation parts. For higher performance, they can deploy approaches
+for memoizing processing, for example by generating keys.
 
-.. code-block:: python
+Order of Evaluation
+-------------------
 
-    html'<li {attrs}>Some todo: {todo}</li>'
+Imagine a tag that generates a number of sections in HTML. The tag needs inputs for each
+section. But what if the last input argument takes a while? You can't return the HTML for
+the first section until all the arguments are available.
 
-Regardless of the expressions ``attrs`` and ``todo``, we would expect that the
-static part of the tag string should be parsed the same. So it is possible to
-memoize the parse, but only on the strings ``'<li> ''``, ``''>Some todo: ''``,
-``'</li>''``:
-
-.. code-block:: python
-
-    def memoization_key(*args: str | Thunk) -> tuple[str...]:
-        return tuple(arg for arg in args if isinstance(arg, str))
-
-Such tag functions can memoize as follows:
-
-1. Compute the memoization key.
-2. Check in the cache if there's an existing parsed templated for that
-   memoization key.
-3. If not, parse, keeping tracking of interpolation points.
-4. Apply interpolations to parsed template.
-
-TODO need to actually write this - there's an example of how to do this for
-writing an ``html`` tag in the companion tutorial PEP.
-
-
-Examples
-========
-
-- TODO Link to longer examples in the repo
+You'd prefer to emit markup as the inputs are available. Some templating tools support
+this approach, as does tag strings.
 
 Reference Implementation
 ========================
 
+At the time of this PEP's announcement, a fully-working implementation is
+[available as a branch of 3.12](https://github.com/gvanrossum/cpython/tree/tag-strings-v2).
+
+This branch does not have the final internal implementation, as the PEP discussion
+will likely provide changes. The branch also doesn't provide the ``Decoded`` and
+``Interpolation`` protocols.
+
 Rejected Ideas
 ==============
 
-Cooked String Chunks By Default
--------------------------------
-
-This approach of cooked vs raw is somewhat similar to what is done in tagged
-template literals in JavaScript, although its `convention
-<https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Template_literals#raw_strings>`_
-is that strings are by
-default cooked, with ``raw`` available as an attribute.
-
-However, the decoder for ``unicode-escape``, as of 3.6, returns a
-``DeprecationWarning``, if the `escapes are not valid for a Python literal
-string
-<https://docs.python.org/dev/whatsnew/3.6.html#deprecated-python-behavior>`.
-
-Additionally if the string is not raw, as of 3.12, this becomes a
-``SyntaxWarning`` if it's in Python source text; see `this issue
-<https://github.com/python/cpython/issues/98401>`_.
-
-A simple example to show this would be ``r'\.py'`` vs ``'\.py'``. The first
-usage would often be used with the ``re`` embedded DSL. However, it's not a
-permissible non-raw Python string literal, given that ``\.`` is not a valid
-escape in Python source itself.
-
-Given these caveats, providing a cooked string by default is rejected, to avoid
-emitting unnecessary warnings on every construction of a ``Chunk`` with an
-invalid Python literal string. In addition, it's possible to annotate a tag to
-indicate to an IDE or other tool that the source text should be treated as raw
-or cooked with respect to Python escapes, as was discussed with tool support.
-
-Cached Values For ``getvalue``
-------------------------------
-
-FIXME
 
 Enable Exact Round-Tripping of ``conv`` and ``format_spec``
-----------------------------------------------------------
+-----------------------------------------------------------
 
 There are two limitations with respect to exactly round-tripping to the original
 source text.
@@ -686,7 +681,7 @@ First, the ``format_spec`` can be arbitrarily nested:
     mytag'{x:{a{b{c}}}}'
 
 In this PEP and corresponding reference implementation, the format_spec
-is eagerly evaluated to set the ``format_spec`` in the thunk, thereby losing the
+is eagerly evaluated to set the ``format_spec`` in the interpolation, thereby losing the
 original expressions.
 
 Secondly, ``mytag'{expr=}'`` is parsed to being the same as
@@ -695,17 +690,17 @@ easier debugging <https://github.com/python/cpython/issues/80998>`_.
 
 While it would be feasible to preserve round-tripping in every usage, this would
 require an extra flag ``equals`` to support, for example, ``{x=}``, and a
-recursive ``Thunk`` definition for ``format_spec``. The following is roughly the
+recursive ``Interpolation`` definition for ``format_spec``. The following is roughly the
 pure Python equivalent of this type, including preserving the sequence
 unpacking (as used in case statements):
 
 .. code-block:: python
 
-    class Thunk(NamedTuple):
+    class InterpolationConcrete(NamedTuple):
         getvalue: Callable[[], Any]
         raw: str
         conv: str | None = None
-        format_spec: str | None | tuple[str | Thunk, ...] = None
+        format_spec: str | None | tuple[Decoded | Interpolation, ...] = None
         equals: bool = False
 
         def __len__(self):
@@ -737,10 +732,23 @@ Because tag strings target embedded DSLs, this complexity introduces other
 issues, such as determining appropriate separators. This seems unnecessarily
 complicated and is thus rejected.
 
+Arbitrary Conversion Values
+---------------------------
+
+Python allows only ``r``, ``s``, or ``a`` as possible conversion type values.
+Trying to assign a different value results in ``SyntaxError``.
+
+In theory, tag functions could choose to handle other conversion types. But this
+PEP adheres closely to :pep:`701`. Any changes to allowed values should be in a
+separate PEP.
+
 Acknowledgements
 ================
 
-FIXME include contributors to this repo, including commenters on issues
+Thanks to Ryan Morshead for contributions during development of the ideas leading
+to tag strings. Thanks also to Koudai Aono for infrastructure work on contributing
+materials. Special mention also to Dropbox's `pyxl <https://github.com/dropbox/pyxl>`_
+as tackling similar ideas years ago.
 
 Copyright
 =========
