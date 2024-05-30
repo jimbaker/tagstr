@@ -15,26 +15,24 @@ are an extension to f-strings, with a custom function -- the "tag" -- in place o
 ``f`` prefix. This function can then provide rich features such as safety checks, lazy
 evaluation, domain-specific languages (DSLs) for web templating, and more.
 
-Tag strings are similar to `JavaScript tagged templates <https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Template_literals#tagged_templates>`_
-and related ideas in other languages.
-
-Tag functions can be very simple:
-
-.. code-block:: python
-
-    def greet(*args):
-        salutation = args[0].strip()
-        getvalue = args[1][0]
-        recipient = getvalue().upper()
-        return f"{salutation} {recipient}!"
-
-With this, ``greet`` can be used in a way that is familiar to f-strings:
+Tag strings are similar to `JavaScript tagged template literals <https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Template_literals#tagged_templates>`_
+and related ideas in other languages. The following tag string usage shows how similar it is to an ``f`` string, albeit
+with the ability to process the literal string and embedded values:
 
 .. code-block:: python
 
     name = "World"
-    greeting = greet"Hello {name}"
+    greeting = greet"hello {name}"
     assert greeting == "Hello WORLD!"
+
+
+Tag functions accept prepared arguments and return a string:
+
+.. code-block:: python
+    def greet(*args):
+        salutation, recipient, *_ = args
+        _, getvalue = recipient
+        return f"{salutation.title()} {getvalue().upper()}!"
 
 Below you can find richer examples. As a note, an implementation based on CPython 3.12
 exists, as discussed in this document.
