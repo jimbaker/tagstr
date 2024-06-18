@@ -240,6 +240,21 @@ Therefore these prefixes can't be used as a tag:
 
     bytesprefix: "b" | "B" | "br" | "Br" | "bR" | "BR" | "rb" | "rB" | "Rb" | "RB"
 
+A tag name can also be any *dotted* name, for example ``app.html``. By extension, this also
+means ``app.f`` would be allowed:
+
+.. code-block:: python
+
+    import app
+
+    app.f'Hello {name}'
+
+Finally, a tag name can use an `atomic expression <https://docs.python.org/3.9/reference/expressions.html#atoms>`_
+when surrounded by parentheses:
+
+.. code-block:: python
+
+    (get_tag())'Is this a service lookup?'
 
 Tags Must Immediately Precede the Quote Mark
 --------------------------------------------
@@ -435,6 +450,14 @@ In this case the format_spec for the second interpolation is the string
 ``'HTMLNode|str'``; it is up to the ``html`` tag to do something with the
 "format spec" here, if anything.
 
+f-string-style ``=`` Evaluation
+-------------------------------
+
+``mytag'{expr=}'`` is parsed to being the same as ``mytag'expr={expr}``', as
+implemented in the issue `Add = to f-strings for
+easier debugging <https://github.com/python/cpython/issues/80998>`_. We will
+need to ensure there are no unrecoverable corner cases.
+
 Tag Function Arguments
 ----------------------
 
@@ -460,6 +483,13 @@ the following, at the cost of losing some type specificity:
 
     def mytag(*args: str | tuple) -> Any:
         ...
+
+Return Value
+------------
+
+Tag functions can return any type. Often they will return a string, but
+richer systems can be built by returning richer objects. See below for
+a motivating example.
 
 Function Application
 --------------------
@@ -504,6 +534,35 @@ Likewise:
 
     mytag()
 
+HTML Example of Rich Return Types
+=================================
+
+Tag functions can be a powerful part of larger processing chains by returning richer objects.
+JavaScript tagged template literals, for example, are not constrained by a requirement to
+return a string. As an example, let's look at an HTML generation system with a signature
+for an ``html`` tag string:
+
+.. code-block:: python
+
+    def html(*args: Decoded | Interpolation) -> HTML:
+        ...
+
+This ``HTML`` return class might have the following shape as a ``Protocol``:
+
+.. code-block:: python
+
+TODO Jim
+
+In summary, the returned instance can be used as:
+
+- A string, for serializing to the final output
+- An iterable, for working with WSGI/ASGI for output streamed and evaluated
+  interpolations *in the order* they are written out
+- A DOM (data) structure of nested Python data
+
+In each case, the result can be lazily and recursively composed in a safe fashion, because
+the return value isn't required to be a string. Recommended practice is that
+return values are "passive" objects.
 
 Tool Support
 ============
@@ -659,10 +718,6 @@ First, the ``format_spec`` can be arbitrarily nested:
 In this PEP and corresponding reference implementation, the format_spec
 is eagerly evaluated to set the ``format_spec`` in the interpolation, thereby losing the
 original expressions.
-
-Secondly, ``mytag'{expr=}'`` is parsed to being the same as
-``mytag'expr={expr}``', as implemented in the issue `Add = to f-strings for
-easier debugging <https://github.com/python/cpython/issues/80998>`_.
 
 While it would be feasible to preserve round-tripping in every usage, this would
 require an extra flag ``equals`` to support, for example, ``{x=}``, and a
