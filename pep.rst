@@ -33,7 +33,7 @@ Tag functions accept prepared arguments and return a string:
     def greet(*args):
         salutation, recipient, *_ = args
         _, getvalue = recipient
-        return f"{salutation.title()} {getvalue().upper()}!"
+        return f"{salutation.title().strip()} {getvalue().upper()}!"
 
 Below you can find richer examples. As a note, an implementation based on CPython 3.12
 exists, as discussed in this document.
@@ -475,21 +475,6 @@ This is equivalent to:
 .. code-block:: python
 
     mytag('Hi, ', (lambda: name, 'name', 's', 'format_spec'), '!')
-
-Tag Function Names are in the Same Namespace
---------------------------------------------
-
-Because tag functions are simply callables on a sequence of decoded strings and
-interpolations, it is possible to write code like the following:
-
-.. code-block:: python
-
-    length = len'foo'
-
-In practice, this seems to be a remote corner case. We can readily define
-functions that are named ``f``, but in actual usage they are rarely, if ever,
-mixed up with a f-string. Similar observations can apply to the use of soft
-keywords like ``match`` or ``type``. The same should be true for tag strings.
 
 No Empty Decoded String
 -----------------------
