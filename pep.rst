@@ -29,6 +29,7 @@ with the ability to process the literal string and embedded values:
 Tag functions accept prepared arguments and return a string:
 
 .. code-block:: python
+
     def greet(*args):
         salutation, recipient, *_ = args
         _, getvalue = recipient
@@ -167,7 +168,7 @@ Here is a more generalized version using structural pattern matching and type hi
         for arg in args:
             match arg:
                 case Decoded() as decoded:
-                    result.append(arg)
+                    result.append(decoded)
                 case Interpolation() as interpolation:
                     value = interpolation.getvalue()
                     result.append(value.upper())
@@ -202,7 +203,7 @@ provide Python string formatting info, as well as the original text:
     name = "World"
     assert greet"Hello {name!r:s}" == "Hello gv: World, r: name, c: r, f: s!"
 
-You can see each ``Interpolation`` parts getting extracted:
+You can see each of the ``Interpolation`` parts getting extracted:
 
 - The lambda expression to call and get the value in the scope it was defined
 - The raw string of the interpolation (``name``)
@@ -467,13 +468,13 @@ Tag strings desugar as follows:
 
 .. code-block:: python
 
-    mytag'Hi, {name}!'
+    mytag'Hi, {name!s:format_spec}!'
 
 This is equivalent to:
 
 .. code-block:: python
 
-    mytag('Hi, ', (lambda: name, 'name', None, None), '!')
+    mytag('Hi, ', (lambda: name, 'name', 's', 'format_spec'), '!')
 
 Tag Function Names are in the Same Namespace
 --------------------------------------------
