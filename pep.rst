@@ -546,12 +546,6 @@ interpolations, are as follows:
 2. Tag functions can ensure that any interpolations are done in a safe fashion,
    including respecting the context in the target DSL.
 
-Performance Impact
-==================
-
-- Faster than getting frames
-- Opportunities for speedups
-
 How To Teach This
 =================
 
