@@ -539,20 +539,31 @@ HTML Example of Rich Return Types
 
 Tag functions can be a powerful part of larger processing chains by returning richer objects.
 JavaScript tagged template literals, for example, are not constrained by a requirement to
-return a string. As an example, let's look at an HTML generation system with a signature
-for an ``html`` tag string:
+return a string. As an example, let's look at an HTML generation system, with a usage and
+"subcomponent":
+
+.. code-block::
+
+    def Menu(icon: str) -> HTML:
+        return html'<img alt="Site Logo" src={icon} />'
+
+    icon = 'acme.png'
+    result = html'<header><{Menu} logo={icon}/></header>'
+    assert result.children[0].tag == "img"
+    assert
+
+This ``html`` tag function might have the following signature:
 
 .. code-block:: python
 
     def html(*args: Decoded | Interpolation) -> HTML:
         ...
 
-This ``HTML`` return class might have the following shape as a ``Protocol``:
+The ``HTML`` return class might have the following shape as a ``Protocol``:
 
 .. code-block:: python
 
-TODO Jim
-
+TODO Jim HTML class
 In summary, the returned instance can be used as:
 
 - A string, for serializing to the final output
@@ -563,6 +574,15 @@ In summary, the returned instance can be used as:
 In each case, the result can be lazily and recursively composed in a safe fashion, because
 the return value isn't required to be a string. Recommended practice is that
 return values are "passive" objects.
+
+What benefits might come from return rich objects instead of strings? A DSL for
+a domain such as HTML templating can provide a toolchain of post-processing, as
+`Babel <https://babeljs.io>`_ does for JavaScript
+`with AST-based transformation plugins <https://babeljs.io/docs/#pluggable>`_.
+Similarly, systems that provide middleware processing can operate on richer,
+standard objects with more capabilities. Tag string results can be tested as
+nested Python objects, rather than string manipulation. Finally, the intermediate
+results can be cached/persisted in useful ways.
 
 Tool Support
 ============
