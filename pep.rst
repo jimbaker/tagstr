@@ -444,10 +444,10 @@ spec and conversion in an interpolation. For example, this is a valid usage:
 
 .. code-block:: python
 
-    html'<div id={id:int}>{content:HTMLNode|str}</div>'
+    html'<div id={id:int}>{content:HTML|str}</div>'
 
 In this case the format_spec for the second interpolation is the string
-``'HTMLNode|str'``; it is up to the ``html`` tag to do something with the
+``'HTML|str'``; it is up to the ``html`` tag to do something with the
 "format spec" here, if anything.
 
 f-string-style ``=`` Evaluation
