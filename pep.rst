@@ -562,7 +562,12 @@ The ``HTML`` return class might have the following shape as a ``Protocol``:
 
 .. code-block:: python
 
-TODO Jim HTML class
+    @runtime_checkable
+    class HTML(Protocol):
+        tagname: str
+        attrs: dict
+        children: list[Union[str, 'HTML']]
+
 In summary, the returned instance can be used as:
 
 - A string, for serializing to the final output
