@@ -249,7 +249,7 @@ means ``app.f`` would be allowed:
 
     app.f'Hello {name}'
 
-Finally, a tag name can use an `atomic expression <https://docs.python.org/3.9/reference/expressions.html#atoms>`_
+Finally, a tag name can use an `atomic expression <https://docs.python.org/3.13/reference/expressions.html#atoms>`_
 when surrounded by parentheses:
 
 .. code-block:: python
