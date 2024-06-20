@@ -455,8 +455,7 @@ f-string-style ``=`` Evaluation
 
 ``mytag'{expr=}'`` is parsed to being the same as ``mytag'expr={expr}``', as
 implemented in the issue `Add = to f-strings for
-easier debugging <https://github.com/python/cpython/issues/80998>`_. We will
-need to ensure there are no unrecoverable corner cases.
+easier debugging <https://github.com/python/cpython/issues/80998>`_.
 
 Tag Function Arguments
 ----------------------
