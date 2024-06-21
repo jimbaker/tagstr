@@ -581,7 +581,7 @@ In each case, the result can be lazily and recursively composed in a safe fashio
 the return value isn't required to be a string. Recommended practice is that
 return values are "passive" objects.
 
-What benefits might come from return rich objects instead of strings? A DSL for
+What benefits might come from returning rich objects instead of strings? A DSL for
 a domain such as HTML templating can provide a toolchain of post-processing, as
 `Babel <https://babeljs.io>`_ does for JavaScript
 `with AST-based transformation plugins <https://babeljs.io/docs/#pluggable>`_.
