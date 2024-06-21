@@ -547,9 +547,11 @@ return a string. As an example, let's look at an HTML generation system, with a 
         return html'<img alt="Site Logo" src={icon} />'
 
     icon = 'acme.png'
-    result = html'<header><{Menu} logo={icon}/></header>'
-    assert result.children[0].tag == "img"
-    assert
+    result = html'<header><{Menu} logo={icon} class="my-menu"/></header>'
+    img = result.children[0]
+    assert img.tag == "img"
+    assert img.props == {"logo": "acme.png", "class": "my-menu"}
+
 
 This ``html`` tag function might have the following signature:
 
