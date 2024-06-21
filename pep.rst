@@ -543,15 +543,16 @@ return a string. As an example, let's look at an HTML generation system, with a 
 
 .. code-block::
 
-    def Menu(icon: str) -> HTML:
-        return html'<img alt="Site Logo" src={icon} />'
+    def Menu(*, logo: str, class_: str) -> HTML:
+        return html'<img alt="Site Logo" src={logo} class={class_} />'
 
     icon = 'acme.png'
     result = html'<header><{Menu} logo={icon} class="my-menu"/></header>'
     img = result.children[0]
-    assert img.tag == "img"
-    assert img.props == {"logo": "acme.png", "class": "my-menu"}
-
+    assert img.tagname == "img"
+    assert img.attrs == {"src": "acme.png", "class": "my-menu", "alt": "Site Logo"}
+    # We can also treat the return type as a string of specially-serialized HTML
+    assert str(result) = '<header>' # etc.
 
 This ``html`` tag function might have the following signature:
 
