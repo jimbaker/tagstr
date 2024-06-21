@@ -770,12 +770,6 @@ unpacking (as used in case statements):
 However, the additional complexity to support exact round-tripping seems
 unnecessary and is thus rejected.
 
-No Dotted Tag Names
-------------------
-
-While it is possible to relax the restriction to not use dotted names, much as was
-done with decorators, this usage seems unnecessary and is thus rejected.
-
 No Implicit String Concatenation
 --------------------------------
 
