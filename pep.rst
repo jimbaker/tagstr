@@ -549,7 +549,7 @@ return a string. As an example, let's look at an HTML generation system, with a 
     icon = 'acme.png'
     result = html'<header><{Menu} logo={icon} class="my-menu"/></header>'
     img = result.children[0]
-    assert img.tagname == "img"
+    assert img.tag == "img"
     assert img.attrs == {"src": "acme.png", "class": "my-menu", "alt": "Site Logo"}
     # We can also treat the return type as a string of specially-serialized HTML
     assert str(result) = '<header>' # etc.
@@ -567,9 +567,9 @@ The ``HTML`` return class might have the following shape as a ``Protocol``:
 
     @runtime_checkable
     class HTML(Protocol):
-        tagname: str
-        attrs: dict
-        children: list[Union[str, 'HTML']]
+        tag: str
+        attrs: dict[str, Any]
+        children: Sequence[str | HTML]
 
 In summary, the returned instance can be used as:
 
