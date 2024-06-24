@@ -241,7 +241,7 @@ Therefore these prefixes can't be used as a tag:
     bytesprefix: "b" | "B" | "br" | "Br" | "bR" | "BR" | "rb" | "rB" | "Rb" | "RB"
 
 A tag name can also be any *dotted* name, for example ``app.html``. By extension, this also
-means ``app.f`` would be allowed:
+means ``app.f`` would be allowed, but discouraged:
 
 .. code-block:: python
 
