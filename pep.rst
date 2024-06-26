@@ -228,8 +228,8 @@ For example:
 Valid Tag Names
 ---------------
 
-The tag name can be any *undotted* name that isn't already an existing valid
-string or bytes prefix, as seen in the `lexical analysis specification
+The tag name can be any name that isn't already an existing valid string or
+bytes prefix, as seen in the `lexical analysis specification
 <https://docs.python.org/3/reference/lexical_analysis.html#string-and-bytes-literals>`_,
 Therefore these prefixes can't be used as a tag:
 
@@ -240,7 +240,7 @@ Therefore these prefixes can't be used as a tag:
 
     bytesprefix: "b" | "B" | "br" | "Br" | "bR" | "BR" | "rb" | "rB" | "Rb" | "RB"
 
-A tag name can also be any *dotted* name, for example ``app.html``. By extension, this also
+This means a tag name can be a dotted name, for example ``app.html``. By extension, this also
 means ``app.f`` would be allowed, but discouraged:
 
 .. code-block:: python
