@@ -33,7 +33,7 @@ Tag functions accept prepared arguments and return a string:
     def greet(*args):
         salutation, recipient, *_ = args
         _, getvalue = recipient
-        return f"{salutation.title()} {getvalue().upper()}!"
+        return f"{salutation.title().strip()} {getvalue().upper()}!"
 
 Below you can find richer examples. As a note, an implementation based on CPython 3.12
 exists, as discussed in this document.
@@ -228,8 +228,8 @@ For example:
 Valid Tag Names
 ---------------
 
-The tag name can be any *undotted* name that isn't already an existing valid
-string or bytes prefix, as seen in the `lexical analysis specification
+The tag name can be any name that isn't already an existing valid string or
+bytes prefix, as seen in the `lexical analysis specification
 <https://docs.python.org/3/reference/lexical_analysis.html#string-and-bytes-literals>`_,
 Therefore these prefixes can't be used as a tag:
 
@@ -240,6 +240,21 @@ Therefore these prefixes can't be used as a tag:
 
     bytesprefix: "b" | "B" | "br" | "Br" | "bR" | "BR" | "rb" | "rB" | "Rb" | "RB"
 
+This means a tag name can be a dotted name, for example ``app.html``. By extension, this also
+means ``app.f`` would be allowed, but discouraged:
+
+.. code-block:: python
+
+    import app
+
+    app.f'Hello {name}'
+
+Finally, a tag name can use an `atomic expression <https://docs.python.org/3.13/reference/expressions.html#atoms>`_
+when surrounded by parentheses:
+
+.. code-block:: python
+
+    (get_tag())'Is this a service lookup?'
 
 Tags Must Immediately Precede the Quote Mark
 --------------------------------------------
@@ -398,7 +413,7 @@ PEP, here is an example of a pure Python implementation:
         getvalue: Callable[[], Any]
         expr: str
         conv: Literal['a', 'r', 's'] | None = None
-        formatspec: str | None = None
+        format_spec: str | None = None
 
 Interpolation Expression Evaluation
 -----------------------------------
@@ -429,11 +444,18 @@ spec and conversion in an interpolation. For example, this is a valid usage:
 
 .. code-block:: python
 
-    html'<div id={id:int}>{content:HTMLNode|str}</div>'
+    html'<div id={id:int}>{content:HTML|str}</div>'
 
 In this case the format_spec for the second interpolation is the string
-``'HTMLNode|str'``; it is up to the ``html`` tag to do something with the
+``'HTML|str'``; it is up to the ``html`` tag to do something with the
 "format spec" here, if anything.
+
+f-string-style ``=`` Evaluation
+-------------------------------
+
+``mytag'{expr=}'`` is parsed to being the same as ``mytag'expr={expr}``', as
+implemented in the issue `Add = to f-strings for
+easier debugging <https://github.com/python/cpython/issues/80998>`_.
 
 Tag Function Arguments
 ----------------------
@@ -461,6 +483,13 @@ the following, at the cost of losing some type specificity:
     def mytag(*args: str | tuple) -> Any:
         ...
 
+Return Value
+------------
+
+Tag functions can return any type. Often they will return a string, but
+richer systems can be built by returning richer objects. See below for
+a motivating example.
+
 Function Application
 --------------------
 
@@ -475,21 +504,6 @@ This is equivalent to:
 .. code-block:: python
 
     mytag('Hi, ', (lambda: name, 'name', 's', 'format_spec'), '!')
-
-Tag Function Names are in the Same Namespace
---------------------------------------------
-
-Because tag functions are simply callables on a sequence of decoded strings and
-interpolations, it is possible to write code like the following:
-
-.. code-block:: python
-
-    length = len'foo'
-
-In practice, this seems to be a remote corner case. We can readily define
-functions that are named ``f``, but in actual usage they are rarely, if ever,
-mixed up with a f-string. Similar observations can apply to the use of soft
-keywords like ``match`` or ``type``. The same should be true for tag strings.
 
 No Empty Decoded String
 -----------------------
@@ -519,6 +533,63 @@ Likewise:
 
     mytag()
 
+HTML Example of Rich Return Types
+=================================
+
+Tag functions can be a powerful part of larger processing chains by returning richer objects.
+JavaScript tagged template literals, for example, are not constrained by a requirement to
+return a string. As an example, let's look at an HTML generation system, with a usage and
+"subcomponent":
+
+.. code-block::
+
+    def Menu(*, logo: str, class_: str) -> HTML:
+        return html'<img alt="Site Logo" src={logo} class={class_} />'
+
+    icon = 'acme.png'
+    result = html'<header><{Menu} logo={icon} class="my-menu"/></header>'
+    img = result.children[0]
+    assert img.tag == "img"
+    assert img.attrs == {"src": "acme.png", "class": "my-menu", "alt": "Site Logo"}
+    # We can also treat the return type as a string of specially-serialized HTML
+    assert str(result) = '<header>' # etc.
+
+This ``html`` tag function might have the following signature:
+
+.. code-block:: python
+
+    def html(*args: Decoded | Interpolation) -> HTML:
+        ...
+
+The ``HTML`` return class might have the following shape as a ``Protocol``:
+
+.. code-block:: python
+
+    @runtime_checkable
+    class HTML(Protocol):
+        tag: str
+        attrs: dict[str, Any]
+        children: Sequence[str | HTML]
+
+In summary, the returned instance can be used as:
+
+- A string, for serializing to the final output
+- An iterable, for working with WSGI/ASGI for output streamed and evaluated
+  interpolations *in the order* they are written out
+- A DOM (data) structure of nested Python data
+
+In each case, the result can be lazily and recursively composed in a safe fashion, because
+the return value isn't required to be a string. Recommended practice is that
+return values are "passive" objects.
+
+What benefits might come from returning rich objects instead of strings? A DSL for
+a domain such as HTML templating can provide a toolchain of post-processing, as
+`Babel <https://babeljs.io>`_ does for JavaScript
+`with AST-based transformation plugins <https://babeljs.io/docs/#pluggable>`_.
+Similarly, systems that provide middleware processing can operate on richer,
+standard objects with more capabilities. Tag string results can be tested as
+nested Python objects, rather than string manipulation. Finally, the intermediate
+results can be cached/persisted in useful ways.
 
 Tool Support
 ============
@@ -560,12 +631,6 @@ interpolations, are as follows:
 
 2. Tag functions can ensure that any interpolations are done in a safe fashion,
    including respecting the context in the target DSL.
-
-Performance Impact
-==================
-
-- Faster than getting frames
-- Opportunities for speedups
 
 How To Teach This
 =================
@@ -681,10 +746,6 @@ In this PEP and corresponding reference implementation, the format_spec
 is eagerly evaluated to set the ``format_spec`` in the interpolation, thereby losing the
 original expressions.
 
-Secondly, ``mytag'{expr=}'`` is parsed to being the same as
-``mytag'expr={expr}``', as implemented in the issue `Add = to f-strings for
-easier debugging <https://github.com/python/cpython/issues/80998>`_.
-
 While it would be feasible to preserve round-tripping in every usage, this would
 require an extra flag ``equals`` to support, for example, ``{x=}``, and a
 recursive ``Interpolation`` definition for ``format_spec``. The following is roughly the
@@ -708,12 +769,6 @@ unpacking (as used in case statements):
 
 However, the additional complexity to support exact round-tripping seems
 unnecessary and is thus rejected.
-
-No Dotted Tag Names
-------------------
-
-While it is possible to relax the restriction to not use dotted names, much as was
-done with decorators, this usage seems unnecessary and is thus rejected.
 
 No Implicit String Concatenation
 --------------------------------
