@@ -5,7 +5,7 @@ Status: Draft
 Type: Standards Track
 Content-Type: text/x-rst
 Created: 01-Jun-2024
-Python-Version: 3.13
+Python-Version: 3.14
 
 Abstract
 ========
@@ -720,7 +720,7 @@ Reference Implementation
 ========================
 
 At the time of this PEP's announcement, a fully-working implementation is
-[available as a branch of 3.12](https://github.com/gvanrossum/cpython/tree/tag-strings-v2).
+[available](https://github.com/lysnikolaou/cpython/tree/tag-strings-rebased).
 
 This branch does not have the final internal implementation, as the PEP discussion
 will likely provide changes. The branch also doesn't provide the ``Decoded`` and
