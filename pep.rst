@@ -6,6 +6,7 @@ Type: Standards Track
 Content-Type: text/x-rst
 Created: 01-Jun-2024
 Python-Version: 3.14
+Sponsor: Lysandros Nikolaou <lisandrosnik@gmail.com>
 
 Abstract
 ========
