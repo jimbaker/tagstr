@@ -250,6 +250,11 @@ means ``app.f`` would be allowed, but discouraged:
 
     app.f'Hello {name}'
 
+Python `restricts certain keywords <https://docs.python.org/3/reference/lexical_analysis.html#keywords>`_ from being
+used as identifiers. This restriction also applies to tag names, including in dotted names. Usage of keywords should
+trigger a helpful error, as done in recent CPython releases.  The simplest solution would sure be to move reserved word
+recognition into the lexer.
+
 Finally, a tag name can use an `atomic expression <https://docs.python.org/3.13/reference/expressions.html#atoms>`_
 when surrounded by parentheses:
 
@@ -483,6 +488,23 @@ the following, at the cost of losing some type specificity:
 
     def mytag(*args: str | tuple) -> Any:
         ...
+
+A user might write a tag string as a split string:
+
+.. code-block:: python
+
+    def tag(*args):
+        return args
+
+    tag"\N{{GRINNING FACE}}"
+
+Tag strings will represent this as exactly one ``Decoded`` argument. In this case, ``Decoded.raw`` would be
+``'\\N{GRINNING FACE}'``. The "cooked" representation via encode and decode would be:
+
+.. code-block:: python
+
+    '\\N{GRINNING FACE}'.encode('utf-8').decode('unicode-escape')
+    '😀'
 
 Return Value
 ------------
