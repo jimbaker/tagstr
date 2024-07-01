@@ -419,8 +419,8 @@ PEP, here is an example of a pure Python implementation:
 Interpolation Expression Evaluation
 -----------------------------------
 
-Expression evaluation for interpolations is the same as in :pep:`498`, except that all
-expressions are always implicitly wrapped with a ``lambda``::
+Expression evaluation for interpolations is the same as in :pep:`498#expression-evaluation`,
+except that all expressions are always implicitly wrapped with a ``lambda``:
 
     The expressions that are extracted from the string are evaluated in the context
     where the tag string appeared. This means the expression has full access to its
