@@ -252,8 +252,7 @@ means ``app.f`` would be allowed, but discouraged:
 
 Python `restricts certain keywords <https://docs.python.org/3/reference/lexical_analysis.html#keywords>`_ from being
 used as identifiers. This restriction also applies to tag names, including in dotted names. Usage of keywords should
-trigger a helpful error, as done in recent CPython releases.  The simplest solution would sure be to move reserved word
-recognition into the lexer.
+trigger a helpful error, as done in recent CPython releases.
 
 Finally, a tag name can use an `atomic expression <https://docs.python.org/3.13/reference/expressions.html#atoms>`_
 when surrounded by parentheses:
