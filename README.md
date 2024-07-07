@@ -8,16 +8,13 @@ evaluation, domain specific languages (DSLs) for web templating, and more.
 Tag strings are similar to `JavaScript tagged templates <https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Template_literals#tagged_templates>`_
 and similar ideas in other languages.
 
-## Examples repo
+## More info
 
-To keep the conversation here focused on the PEP, we moved supporting material to 
-[a companion repo](https://github.com/pauleveritt/tagstr-site). There you can find 
-resources such as:
-
-- JupyterLite playground for tag strings
-- Docker builds
-- Long-form tutorials
-- Example code
+- [Implementation (WIP) based on 3.14](https://github.com/lysnikolaou/cpython/tree/tag-strings-rebased)
+- [Documentation site](https://pauleveritt.github.io/tagstr-site/) including:
+  - An [HTML templating tutorial](https://pauleveritt.github.io/tagstr-site/htmlbuilder.html)
+  - Docker instructions for [prebuilt image](https://hub.docker.com/r/koxudaxi/python)
+  - Support for devcontainer checkout
 
 ## Related Work
 
