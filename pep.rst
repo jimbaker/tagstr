@@ -229,7 +229,7 @@ For example:
 Valid Tag Names
 ---------------
 
-The tag name can be any name that isn't already an existing valid string or
+The tag name can be any undotted name that isn't already an existing valid string or
 bytes prefix, as seen in the `lexical analysis specification
 <https://docs.python.org/3/reference/lexical_analysis.html#string-and-bytes-literals>`_,
 Therefore these prefixes can't be used as a tag:
@@ -241,25 +241,9 @@ Therefore these prefixes can't be used as a tag:
 
     bytesprefix: "b" | "B" | "br" | "Br" | "bR" | "BR" | "rb" | "rB" | "Rb" | "RB"
 
-This means a tag name can be a dotted name, for example ``app.html``. By extension, this also
-means ``app.f`` would be allowed, but discouraged:
-
-.. code-block:: python
-
-    import app
-
-    app.f'Hello {name}'
-
 Python `restricts certain keywords <https://docs.python.org/3/reference/lexical_analysis.html#keywords>`_ from being
-used as identifiers. This restriction also applies to tag names, including in dotted names. Usage of keywords should
+used as identifiers. This restriction also applies to tag names. Usage of keywords should
 trigger a helpful error, as done in recent CPython releases.
-
-Finally, a tag name can use an `atomic expression <https://docs.python.org/3.13/reference/expressions.html#atoms>`_
-when surrounded by parentheses:
-
-.. code-block:: python
-
-    (get_tag())'Is this a service lookup?'
 
 Tags Must Immediately Precede the Quote Mark
 --------------------------------------------
@@ -290,7 +274,7 @@ to:
 
 .. code-block:: python
 
-    mytag(DecodedConcrete(r'Did you say "'), InterpolationConcrete(lambda: trade, 'trade'), DecodedConcrete(r'"?'))
+    mytag(DecodedConcrete(r'Did you say "'), InterpolationConcrete(lambda: trade, 'trade', None, None), DecodedConcrete(r'"?'))
 
 .. note::
 
@@ -525,7 +509,7 @@ This is equivalent to:
 
 .. code-block:: python
 
-    mytag('Hi, ', (lambda: name, 'name', 's', 'format_spec'), '!')
+    mytag(DecodedConcrete(r'Hi, '), InterpolationConcrete(lambda: name, 'name', 's', 'format_spec'), DecodedConcrete(r'!'))
 
 No Empty Decoded String
 -----------------------
@@ -541,7 +525,7 @@ on the tag string. Decoded strings will never have a value that is the empty str
 
 .. code-block:: python
 
-    mytag(InterpolationConcrete(lambda: a, 'a'), InterpolationConcrete(lambda: b, 'b'), InterpolationConcrete(lambda: c, 'c'))
+    mytag(InterpolationConcrete(lambda: a, 'a', None, None), InterpolationConcrete(lambda: b, 'b', None, None), InterpolationConcrete(lambda: c, 'c', None, None))
 
 Likewise:
 
@@ -744,9 +728,7 @@ Reference Implementation
 At the time of this PEP's announcement, a fully-working implementation is
 [available](https://github.com/lysnikolaou/cpython/tree/tag-strings-rebased).
 
-This branch does not have the final internal implementation, as the PEP discussion
-will likely provide changes. The branch also doesn't provide the ``Decoded`` and
-``Interpolation`` protocols.
+This implementation is not final, as the PEP discussion will likely provide changes.
 
 Rejected Ideas
 ==============
