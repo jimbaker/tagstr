@@ -5,7 +5,7 @@ ways.
 
 Too busy to read? Here's the top-line:
 
-- No more lazy evaluation
+- No more lazy evaluation of interpolations
 - No more tag functions, no more "tag"
 - Instead, a single `t` prefix which passes a `Template` to your function
 - `Template.source` which has the full-string
@@ -14,15 +14,16 @@ Too busy to read? Here's the top-line:
 
 Now for more detail.
 
-## Eager evaluation
+## Eager evaluation of interpolations
 
-Our first version featured lazy evaluation. This generated very strong pushback: it's hard for coders to reason about,
-leads to surprising outcomes vs. f-strings, and challenges static analysis. The feeling: choosing "lazy" should be
-opt-in, and the coder should make that choice e.g. via lambda wrapping the interpolation.
+Our first version featured lazy evaluation of interpolations. This generated very strong pushback: it's hard for coders
+to reason about, leads to surprising outcomes vs. f-strings, and challenges static analysis. The feeling: choosing "
+lazy" should be opt-in, and the coder should make that choice e.g. via lambda wrapping the interpolation.
 
-We now use eager evaluation, storing the result on `Interpolation.value`. We still believe lazy
+We now use eager evaluation of interpolation, storing the result on `Interpolation.value`. We still believe lazy
 evaluation has a place, but will defer (hah!) that to another PEP. We also believe there are ways to keep some of the
-deferred approach, which we plan to briefly outline.
+deferred approach, which we plan to briefly outline. Finally, we envision DSLs with intermediate representations (i.e.
+ASTs) which lazily-render to a string as a later step.
 
 ## Template strings
 
@@ -120,5 +121,5 @@ i18n is a really important use case. In particular, choosing syntax that fits in
 if we could consolidate templating and translation into one PEP and syntax. While we don't see a path at the moment,
 it's hopeful that a future variety of template string could accomplish this.
 
-The thread discussed variations of template strings: `tr` for raw, `tb` for bytes. We plan to leave that for follow-on
+The thread discussed variations of template strings, such as `tb` for bytes. We plan to leave that for follow-on
 work.
