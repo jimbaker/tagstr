@@ -7,7 +7,7 @@ Too busy to read? Here's the top-line:
 
 - No more lazy evaluation of interpolations
 - No more tag functions, no more "tag"
-- Instead, a single `t` prefix which passes a `Template` to your function
+- Instead, a single `t` prefix which creates an instance of Template from the provided string
 - `Template.source` which has the full-string
 - A normative section on how to signal the DSL to tools
 - Better examples and explanations of the need
@@ -82,9 +82,9 @@ class Template(Protocol):
 
 
 @runtime_checkable
-class HTMLTemplate(Template):
-    source: Annotated[str, Literal("html")]
-    # Literal("html") might be imported from a standard library 
+class HTMLTemplate(Template, Protocol):
+    source: Annotated[str, Literal["html"]]
+    # Literal["html"] might be imported from a standard library 
     # package. Or a registry. Or some other idea. Or, Annotated
     # might have multiple "flags".
 ```
